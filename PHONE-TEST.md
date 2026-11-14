@@ -10,13 +10,13 @@ This file is the checklist. It has not been run on the phone yet.
 
 ## Steps
 
-1. Grant all four settings. Select YouTube. Turn Ticker on. Preview the strip over the setup screen. The preview does not turn the quiet rule on.
+1. Grant all four settings. Select YouTube. Turn Ribbon Notifs on. Preview the strip over the setup screen. The preview does not turn the quiet rule on.
 2. Play a YouTube video. The video’s sound continues. The strip is absent until some other app posts an alert.
 3. Send a chat message from another phone. Record whether a heads-up appeared, whether the phone made a sound or vibrated, and whether the strip showed the message. Open the shade and confirm the original notification is still there, with its actions. Also record any One UI pop-up, floating window, or edge lighting.
 4. Leave YouTube. The strip is gone, and Modes / Do Not Disturb no longer shows this rule as active. Send another message and confirm a normal banner and sound.
 5. While a video is playing, trigger an alarm and place a phone call. Both should still interrupt.
 6. Lock the phone while a message is on the strip. The strip must not remain on the lock screen. Check this on the display that is actually on, inner or cover.
-7. Force-stop Ticker while a video is playing and the rule is active. Launch Ticker again. The rule must be inactive unless YouTube is still the foreground app.
+7. Force-stop Ribbon Notifs while a video is playing and the rule is active. Launch Ribbon Notifs again. The rule must be inactive unless YouTube is still the foreground app.
 8. Rotate the phone, and fold or unfold it, during a scroll. The strip stays thin, stays under the status bar, and still does not eat taps.
 9. Repeat step 3 on the other display. Write down any alert type that still banners.
 

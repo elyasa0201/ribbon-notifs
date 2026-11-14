@@ -97,7 +97,7 @@ internal class StripOverlay(private val app: Context) {
                     layoutInDisplayCutoutMode =
                         WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                 }
-                title = "Ticker"
+                title = "Ribbon Notifs"
             }
             val strip = StripView(context)
             strip.setOnApplyWindowInsetsListener { _, insets ->
