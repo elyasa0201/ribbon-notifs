@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="paper">#F4F0E6</color>
+    <color name="ink">#1C1B19</color>
+    <color name="muted">#5E5A54</color>
+    <color name="accent">#0F6E56</color>
+    <color name="accent_dark">#0B3D32</color>
+    <color name="card">#FFFFFF</color>
+    <color name="warning_bg">#F8E6C8</color>
+    <color name="warning_ink">#6A3E00</color>
+    <color name="missing">#8C3A2F</color>
+    <color name="strip">#F2151515</color>
+    <color name="strip_text">#FFFFFF</color>
+    <color name="icon_bg">#14302A</color>
+</resources>
