@@ -5,12 +5,19 @@ import android.os.Build
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
+import android.view.WindowInsetsController
 import android.widget.FrameLayout
 
 internal fun Activity.installSystemBarPadding(root: View) {
     if (Build.VERSION.SDK_INT < 30) return
     @Suppress("DEPRECATION")
     window.setDecorFitsSystemWindows(false)
+    window.insetsController?.setSystemBarsAppearance(
+        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+    )
     root.setOnApplyWindowInsetsListener { view, insets ->
         val bars = insets.getInsets(
             WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()

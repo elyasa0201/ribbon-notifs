@@ -24,7 +24,7 @@ class SetupActivity : android.app.Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_setup)
-        val root = findViewById<View>(R.id.setup_scroll)
+        val root = findViewById<View>(R.id.setup_root)
         installSystemBarPadding(root)
         capContentWidth(root)
         master = findViewById(R.id.master_switch)
@@ -36,15 +36,15 @@ class SetupActivity : android.app.Activity() {
             controller.setMasterEnabled(checked)
             render()
         }
-        findViewById<Button>(R.id.choose_apps).setOnClickListener {
+        findViewById<View>(R.id.choose_apps).setOnClickListener {
             startActivity(android.content.Intent(this, AppPickerActivity::class.java))
         }
-        findViewById<Button>(R.id.preview_strip).setOnClickListener {
+        findViewById<View>(R.id.preview_strip).setOnClickListener {
             if (!controller.previewStrip()) {
                 Toast.makeText(this, R.string.overlay_needed, Toast.LENGTH_LONG).show()
             }
         }
-        findViewById<Button>(R.id.turn_rule_off).setOnClickListener {
+        findViewById<View>(R.id.turn_rule_off).setOnClickListener {
             controller.turnRuleOffNow()
             render()
         }
