@@ -1,3 +1,5 @@
+# ribbon-notifs
+
 # Ribbon Notifs
 
 Ribbon Notifs is a single-phone Android app. While an app you choose is in front, ordinary alerts go silent, stay in the notification shade, and scroll by on a thin strip that does not take taps. Calls and alarms still interrupt. Media stays allowed, so a video’s audio keeps playing.
