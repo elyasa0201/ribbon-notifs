@@ -28,13 +28,22 @@
     <string name="overlay_needed">Allow display over other apps before previewing the strip.</string>
 
     <string name="tab_apps">Apps</string>
-    <string name="tab_appearance">Appearance</string>
+    <string name="tab_appearance">Customise</string>
     <string name="tab_permissions">Permissions</string>
     <string name="chosen_apps">Chosen apps</string>
     <string name="no_chosen_apps">No apps chosen yet. Search to add one. Tap a chosen app to remove it.</string>
-    <string name="appearance_title">Appearance</string>
-    <string name="text_size_value">Text size · %1$d sp</string>
-    <string name="scroll_speed_value">Scroll speed · %1$d</string>
+    <string name="appearance_title">Customise</string>
+    <string name="text_size_label">Text size</string>
+    <string name="scroll_speed_label">Scroll speed</string>
+    <string name="step_xs">xs</string>
+    <string name="step_s">s</string>
+    <string name="step_m">m</string>
+    <string name="step_l">l</string>
+    <string name="step_xl">xl</string>
+    <string name="preview_app">Preview</string>
+    <string name="sample_line">%1$s: %2$s</string>
+    <string name="sample_notification">New message. This is how it looks on the strip.</string>
+    <string name="bg_none">No background</string>
     <string name="background_label">Background</string>
     <string name="bg_ribbon">Ribbon</string>
     <string name="bg_black">Black</string>

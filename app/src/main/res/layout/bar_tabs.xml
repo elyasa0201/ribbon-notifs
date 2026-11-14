@@ -15,8 +15,8 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:paddingTop="6dp"
-        android:paddingBottom="8dp">
+        android:paddingTop="12dp"
+        android:paddingBottom="14dp">
 
         <LinearLayout
             android:id="@+id/tab_apps"
@@ -32,13 +32,13 @@
 
             <FrameLayout
                 android:id="@+id/tab_apps_pill"
-                android:layout_width="64dp"
-                android:layout_height="32dp">
+                android:layout_width="96dp"
+                android:layout_height="48dp">
 
                 <ImageView
                     android:id="@+id/tab_apps_icon"
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
                     android:layout_gravity="center"
                     android:contentDescription="@null"
                     android:importantForAccessibility="no"
@@ -49,9 +49,9 @@
                 android:id="@+id/tab_apps_label"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:text="@string/tab_apps"
-                android:textSize="12sp" />
+                android:textSize="15sp" />
         </LinearLayout>
 
         <LinearLayout
@@ -68,13 +68,13 @@
 
             <FrameLayout
                 android:id="@+id/tab_appearance_pill"
-                android:layout_width="64dp"
-                android:layout_height="32dp">
+                android:layout_width="96dp"
+                android:layout_height="48dp">
 
                 <ImageView
                     android:id="@+id/tab_appearance_icon"
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
                     android:layout_gravity="center"
                     android:contentDescription="@null"
                     android:importantForAccessibility="no"
@@ -85,9 +85,9 @@
                 android:id="@+id/tab_appearance_label"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:text="@string/tab_appearance"
-                android:textSize="12sp" />
+                android:textSize="15sp" />
         </LinearLayout>
 
         <LinearLayout
@@ -104,13 +104,13 @@
 
             <FrameLayout
                 android:id="@+id/tab_permissions_pill"
-                android:layout_width="64dp"
-                android:layout_height="32dp">
+                android:layout_width="96dp"
+                android:layout_height="48dp">
 
                 <ImageView
                     android:id="@+id/tab_permissions_icon"
-                    android:layout_width="24dp"
-                    android:layout_height="24dp"
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
                     android:layout_gravity="center"
                     android:contentDescription="@null"
                     android:importantForAccessibility="no"
@@ -121,9 +121,9 @@
                 android:id="@+id/tab_permissions_label"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:text="@string/tab_permissions"
-                android:textSize="12sp" />
+                android:textSize="15sp" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

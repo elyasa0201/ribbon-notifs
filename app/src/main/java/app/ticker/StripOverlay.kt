@@ -29,7 +29,17 @@ internal data class StripAppearance(
         const val DEFAULT_TEXT_SP = 14
         const val DEFAULT_SPEED_DP = 70
         const val DEFAULT_BACKGROUND = 0xF2151515.toInt()
+        const val NO_BACKGROUND = Color.TRANSPARENT
     }
+}
+
+internal object StripSteps {
+    val textSp = intArrayOf(11, 12, 14, 18, 22)
+    val speedDp = intArrayOf(35, 50, 70, 110, 160)
+
+    fun nearestText(value: Int): Int = textSp.minBy { kotlin.math.abs(it - value) }
+
+    fun nearestSpeed(value: Int): Int = speedDp.minBy { kotlin.math.abs(it - value) }
 }
 
 internal class StripOverlay(private val app: Context) {

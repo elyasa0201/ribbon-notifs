@@ -164,6 +164,12 @@ internal class TickerController(private val app: Context) {
         return true
     }
 
+    fun previewSample(line: String): Boolean {
+        if (!Grants.overlay(app)) return false
+        enqueue(Line(line, preview = true))
+        return true
+    }
+
     fun onListenerConnected() {
         listenerConnected = true
         if (Grants.policy(app)) ensureRule()
