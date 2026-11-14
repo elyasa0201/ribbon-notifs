@@ -8,7 +8,7 @@ import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 
-class SetupActivity : android.app.Activity() {
+class PermissionsActivity : android.app.Activity() {
     private val controller: TickerController
         get() = (application as TickerApp).controller
 
@@ -23,10 +23,11 @@ class SetupActivity : android.app.Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_setup)
-        val root = findViewById<View>(R.id.setup_root)
+        setContentView(R.layout.activity_permissions)
+        val root = findViewById<View>(R.id.permissions_root)
         installSystemBarPadding(root)
         capContentWidth(root)
+        bindTabs(AppTab.PERMISSIONS)
         master = findViewById(R.id.master_switch)
         blocked = findViewById(R.id.master_blocked)
         warning = findViewById(R.id.policy_warning)
@@ -35,9 +36,6 @@ class SetupActivity : android.app.Activity() {
             if (rendering) return@setOnCheckedChangeListener
             controller.setMasterEnabled(checked)
             render()
-        }
-        findViewById<View>(R.id.choose_apps).setOnClickListener {
-            startActivity(android.content.Intent(this, AppPickerActivity::class.java))
         }
         findViewById<View>(R.id.preview_strip).setOnClickListener {
             if (!controller.previewStrip()) {

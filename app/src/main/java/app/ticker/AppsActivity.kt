@@ -9,10 +9,9 @@ import android.widget.BaseAdapter
 import android.widget.EditText
 import android.widget.ImageView
 import android.widget.ListView
-import android.widget.Switch
 import android.widget.TextView
 
-class AppPickerActivity : android.app.Activity() {
+class AppsActivity : android.app.Activity() {
     private val controller: TickerController
         get() = (application as TickerApp).controller
 
@@ -20,14 +19,17 @@ class AppPickerActivity : android.app.Activity() {
     private lateinit var empty: TextView
     private lateinit var adapter: AppAdapter
     private var all = emptyList<LaunchableApp>()
+    private var loaded = false
+    private var failed = false
     private var query = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_picker)
-        val root = findViewById<View>(R.id.picker_root)
+        setContentView(R.layout.activity_apps)
+        val root = findViewById<View>(R.id.apps_root)
         installSystemBarPadding(root)
         capContentWidth(root)
+        bindTabs(AppTab.APPS)
         list = findViewById(R.id.app_list)
         empty = findViewById(R.id.empty)
         adapter = AppAdapter()
@@ -49,6 +51,7 @@ class AppPickerActivity : android.app.Activity() {
             val load = loadLaunchableApps(this)
             runOnUiThread {
                 if (isDestroyed) return@runOnUiThread
+                loaded = true
                 when (load) {
                     is AppLoad.Ok -> {
                         all = load.apps
@@ -56,6 +59,7 @@ class AppPickerActivity : android.app.Activity() {
                         applyFilter()
                     }
                     is AppLoad.Failed -> {
+                        failed = true
                         empty.setText(R.string.apps_load_failed)
                         adapter.submit(emptyList())
                     }
@@ -64,15 +68,22 @@ class AppPickerActivity : android.app.Activity() {
         }.start()
     }
 
+    override fun onResume() {
+        super.onResume()
+        controller.onSetupVisible()
+        if (loaded) applyFilter()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_QUERY, query)
     }
 
     private fun applyFilter() {
+        if (failed) return
         val needle = query.trim()
         val shown = if (needle.isEmpty()) {
-            all
+            all.filter { controller.isSelected(it.packageName) }
         } else {
             all.filter {
                 it.label.contains(needle, ignoreCase = true) ||
@@ -81,7 +92,9 @@ class AppPickerActivity : android.app.Activity() {
         }
         empty.setText(
             when {
+                !loaded -> R.string.loading_apps
                 all.isEmpty() -> R.string.no_launchable_apps
+                needle.isEmpty() && shown.isEmpty() -> R.string.no_chosen_apps
                 shown.isEmpty() -> R.string.no_search_results
                 else -> R.string.no_search_results
             }
@@ -104,16 +117,21 @@ class AppPickerActivity : android.app.Activity() {
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
             val view = convertView ?: layoutInflater.inflate(R.layout.row_app, parent, false)
             val app = rows[position]
+            val selected = controller.isSelected(app.packageName)
             view.findViewById<ImageView>(R.id.app_icon).setImageDrawable(app.icon)
             view.findViewById<TextView>(R.id.app_label).text = app.label
-            val toggle = view.findViewById<Switch>(R.id.app_switch)
-            toggle.setOnCheckedChangeListener(null)
-            toggle.isChecked = controller.isSelected(app.packageName)
-            toggle.contentDescription = app.label
-            toggle.setOnCheckedChangeListener { _, checked ->
-                controller.setPackageSelected(app.packageName, checked)
+            view.findViewById<TextView>(R.id.app_package).text = app.packageName
+            view.findViewById<ImageView>(R.id.app_check).visibility =
+                if (selected) View.VISIBLE else View.GONE
+            view.contentDescription = if (selected) {
+                getString(R.string.chosen_apps) + ", " + app.label
+            } else {
+                app.label
             }
-            view.setOnClickListener { toggle.toggle() }
+            view.setOnClickListener {
+                controller.setPackageSelected(app.packageName, !controller.isSelected(app.packageName))
+                applyFilter()
+            }
             return view
         }
     }

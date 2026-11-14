@@ -119,6 +119,31 @@ internal class TickerController(private val app: Context) {
         prefs.setPackageSelected(packageName, selected)
     }
 
+    fun stripTextSizeSp(): Int = prefs.textSizeSp
+
+    fun stripScrollSpeedDp(): Int = prefs.scrollSpeedDp
+
+    fun stripBackground(): Int = prefs.stripBackground
+
+    fun setStripTextSizeSp(value: Int) {
+        prefs.textSizeSp = value
+        overlay.applyAppearance(currentAppearance())
+    }
+
+    fun setStripScrollSpeedDp(value: Int) {
+        prefs.scrollSpeedDp = value
+        overlay.applyAppearance(currentAppearance())
+    }
+
+    fun setStripBackground(color: Int) {
+        prefs.stripBackground = color
+        overlay.applyAppearance(currentAppearance())
+    }
+
+    private fun currentAppearance(): StripAppearance {
+        return StripAppearance(prefs.textSizeSp, prefs.scrollSpeedDp, prefs.stripBackground)
+    }
+
     fun noteInstalled(apps: List<LaunchableApp>) {
         labels.clear()
         for (item in apps) labels[item.packageName] = item.label
@@ -529,7 +554,7 @@ internal class TickerController(private val app: Context) {
                 continue
             }
             if (!canShowOnStrip()) return
-            val shown = overlay.show(next.text) { main.post { onLineFinished() } }
+            val shown = overlay.show(next.text, currentAppearance()) { main.post { onLineFinished() } }
             if (!shown) return
             queue.removeFirst()
             showing = next

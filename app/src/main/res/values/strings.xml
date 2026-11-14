@@ -27,6 +27,20 @@
     <string name="settings_unavailable">That system screen is not available on this phone.</string>
     <string name="overlay_needed">Allow display over other apps before previewing the strip.</string>
 
+    <string name="tab_apps">Apps</string>
+    <string name="tab_appearance">Appearance</string>
+    <string name="tab_permissions">Permissions</string>
+    <string name="chosen_apps">Chosen apps</string>
+    <string name="no_chosen_apps">No apps chosen yet. Search to add one. Tap a chosen app to remove it.</string>
+    <string name="appearance_title">Appearance</string>
+    <string name="text_size_value">Text size · %1$d sp</string>
+    <string name="scroll_speed_value">Scroll speed · %1$d</string>
+    <string name="background_label">Background</string>
+    <string name="bg_ribbon">Ribbon</string>
+    <string name="bg_black">Black</string>
+    <string name="bg_charcoal">Charcoal</string>
+    <string name="bg_navy">Navy</string>
+    <string name="permissions_title">Permissions</string>
     <string name="choose_apps">Choose apps</string>
     <string name="preview_strip">Preview the strip</string>
     <string name="preview_line">Ribbon Notifs — Preview: this is how a message looks on the strip</string>

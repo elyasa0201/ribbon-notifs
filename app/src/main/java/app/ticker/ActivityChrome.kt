@@ -13,8 +13,7 @@ internal fun Activity.installSystemBarPadding(root: View) {
     @Suppress("DEPRECATION")
     window.setDecorFitsSystemWindows(false)
     window.insetsController?.setSystemBarsAppearance(
-        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS,
+        0,
         WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
             WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
     )

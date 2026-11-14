@@ -20,25 +20,57 @@ import android.view.WindowManager
  * One non-touchable line under the status bar. The window flags are what let
  * taps fall through; the view itself never asks for focus.
  */
+internal data class StripAppearance(
+    val textSizeSp: Int = DEFAULT_TEXT_SP,
+    val scrollSpeedDp: Int = DEFAULT_SPEED_DP,
+    val background: Int = DEFAULT_BACKGROUND
+) {
+    companion object {
+        const val DEFAULT_TEXT_SP = 14
+        const val DEFAULT_SPEED_DP = 70
+        const val DEFAULT_BACKGROUND = 0xF2151515.toInt()
+    }
+}
+
 internal class StripOverlay(private val app: Context) {
     private var windowContext: Context? = null
     private var windowManager: WindowManager? = null
     private var view: StripView? = null
     private var params: WindowManager.LayoutParams? = null
     private var displayId: Int = Display.INVALID_DISPLAY
+    private var appearance = StripAppearance()
 
     fun isShowing(): Boolean = view != null
 
-    fun show(text: String, onFinished: () -> Unit): Boolean {
+    fun show(text: String, appearance: StripAppearance, onFinished: () -> Unit): Boolean {
+        this.appearance = appearance
         if (!Settings.canDrawOverlays(app)) return false
         val display = activeDisplay() ?: return false
         if (view == null || display.displayId != displayId) {
             remove()
             if (!add(display)) return false
         }
+        applyAppearance(appearance)
         val strip = view ?: return false
         strip.show(text, onFinished)
         return true
+    }
+
+    fun applyAppearance(appearance: StripAppearance) {
+        this.appearance = appearance
+        val strip = view ?: return
+        strip.applyAppearance(appearance)
+        val layout = params ?: return
+        val manager = windowManager ?: return
+        val height = stripHeight(strip.resources.displayMetrics.density, appearance.textSizeSp)
+        if (layout.height != height) {
+            layout.height = height
+            try {
+                manager.updateViewLayout(strip, layout)
+            } catch (_: IllegalArgumentException) {
+                remove()
+            }
+        }
     }
 
     fun relayout() {
@@ -50,6 +82,7 @@ internal class StripOverlay(private val app: Context) {
             val finished = strip.finishCallback
             remove()
             if (text.isNotEmpty() && finished != null && add(display)) {
+                view?.applyAppearance(appearance)
                 view?.show(text, finished)
             } else {
                 finished?.invoke()
@@ -81,7 +114,7 @@ internal class StripOverlay(private val app: Context) {
             val context = windowContextFor(display)
             val manager = context.getSystemService(WindowManager::class.java) ?: return false
             val density = context.resources.displayMetrics.density
-            val height = (32 * density).toInt().coerceAtLeast(1)
+            val height = stripHeight(density, appearance.textSizeSp)
             val layout = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 height,
@@ -100,6 +133,7 @@ internal class StripOverlay(private val app: Context) {
                 title = "Ribbon Notifs"
             }
             val strip = StripView(context)
+            strip.applyAppearance(appearance)
             strip.setOnApplyWindowInsetsListener { _, insets ->
                 val top = statusBarTop(insets)
                 val current = params
@@ -181,6 +215,12 @@ internal class StripOverlay(private val app: Context) {
         return if (resId > 0) app.resources.getDimensionPixelSize(resId) else 0
     }
 
+    private fun stripHeight(density: Float, textSp: Int): Int {
+        val base = (32 * density).toInt()
+        val needed = (textSp * density + 12 * density).toInt()
+        return maxOf(base, needed).coerceAtLeast(1)
+    }
+
     private fun statusBarTop(insets: WindowInsets): Int {
         return if (Build.VERSION.SDK_INT >= 30) {
             insets.getInsets(WindowInsets.Type.statusBars()).top
@@ -205,6 +245,7 @@ internal class StripView(context: Context) : View(context) {
         )
         typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
     }
+    private var speedDp = StripAppearance.DEFAULT_SPEED_DP.toFloat()
     private var line = ""
     private var offset = 0f
     private var phase = PHASE_HOLD
@@ -225,6 +266,17 @@ internal class StripView(context: Context) : View(context) {
         isFocusable = false
         isClickable = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+
+    fun applyAppearance(appearance: StripAppearance) {
+        speedDp = appearance.scrollSpeedDp.toFloat()
+        paint.textSize = android.util.TypedValue.applyDimension(
+            android.util.TypedValue.COMPLEX_UNIT_SP,
+            appearance.textSizeSp.toFloat(),
+            resources.displayMetrics
+        )
+        setBackgroundColor(appearance.background)
+        invalidate()
     }
 
     fun show(text: String, onFinished: () -> Unit) {
@@ -281,7 +333,7 @@ internal class StripView(context: Context) : View(context) {
                 }
             }
             PHASE_SCROLL -> {
-                val speed = 70f * resources.displayMetrics.density
+                val speed = speedDp * resources.displayMetrics.density
                 offset = (offset + speed * dt / 1000f).coerceAtMost(overflow)
                 if (offset >= overflow - 0.5f) {
                     offset = overflow
