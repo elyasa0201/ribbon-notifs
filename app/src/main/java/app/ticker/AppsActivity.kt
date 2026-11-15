@@ -4,12 +4,10 @@ import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
 import android.widget.BaseAdapter
-import android.widget.Button
 import android.widget.ImageView
 import android.widget.ListView
 import android.widget.Switch
 import android.widget.TextView
-import android.widget.Toast
 
 class AppsActivity : android.app.Activity() {
     private val controller: TickerController
@@ -67,13 +65,6 @@ class AppsActivity : android.app.Activity() {
         adapter.submit(all)
     }
 
-    private fun previewApp(app: LaunchableApp) {
-        val line = getString(R.string.sample_line, app.label, getString(R.string.sample_notification))
-        if (!controller.previewSample(line)) {
-            Toast.makeText(this, R.string.overlay_needed, Toast.LENGTH_LONG).show()
-        }
-    }
-
     private inner class AppAdapter : BaseAdapter() {
         private var rows = emptyList<LaunchableApp>()
 
@@ -94,16 +85,12 @@ class AppsActivity : android.app.Activity() {
             view.findViewById<TextView>(R.id.app_label).text = app.label
             view.findViewById<TextView>(R.id.app_package).text = app.packageName
             val toggle = view.findViewById<Switch>(R.id.app_switch)
-            val preview = view.findViewById<Button>(R.id.app_preview)
             toggle.setOnCheckedChangeListener(null)
             toggle.isChecked = selected
             toggle.contentDescription = app.label
-            preview.visibility = if (selected) View.VISIBLE else View.GONE
             toggle.setOnCheckedChangeListener { _, checked ->
                 controller.setPackageSelected(app.packageName, checked)
-                preview.visibility = if (checked) View.VISIBLE else View.GONE
             }
-            preview.setOnClickListener { previewApp(app) }
             return view
         }
     }

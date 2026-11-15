@@ -1,12 +1,12 @@
 package app.ticker
 
+import android.app.AlertDialog
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.Switch
 import android.widget.TextView
-import android.widget.Toast
 
 class PermissionsActivity : android.app.Activity() {
     private val controller: TickerController
@@ -37,14 +37,15 @@ class PermissionsActivity : android.app.Activity() {
             controller.setMasterEnabled(checked)
             render()
         }
-        findViewById<View>(R.id.preview_strip).setOnClickListener {
-            if (!controller.previewStrip()) {
-                Toast.makeText(this, R.string.overlay_needed, Toast.LENGTH_LONG).show()
-            }
-        }
         findViewById<View>(R.id.turn_rule_off).setOnClickListener {
             controller.turnRuleOffNow()
             render()
+        }
+        findViewById<View>(R.id.rule_info).setOnClickListener {
+            AlertDialog.Builder(this)
+                .setMessage(R.string.rule_off_info)
+                .setPositiveButton(android.R.string.ok, null)
+                .show()
         }
         val rows = listOf(
             Perm(R.string.perm_notification, R.string.perm_notification_why) { openNotificationAccess(this) },

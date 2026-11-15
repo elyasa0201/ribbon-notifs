@@ -40,9 +40,6 @@
     <string name="step_m">m</string>
     <string name="step_l">l</string>
     <string name="step_xl">xl</string>
-    <string name="preview_app">Preview</string>
-    <string name="sample_line">%1$s: %2$s</string>
-    <string name="sample_notification">New message. This is how it looks on the strip.</string>
     <string name="bg_none">No background</string>
     <string name="background_label">Background</string>
     <string name="bg_ribbon">Ribbon</string>
@@ -52,7 +49,11 @@
     <string name="permissions_title">Permissions</string>
     <string name="choose_apps">Choose apps</string>
     <string name="preview_strip">Preview the strip</string>
-    <string name="preview_line">Ribbon Notifs — Preview: this is how a message looks on the strip</string>
+    <string name="preview_line">Ribbon Notifs preview. This sample is long on purpose so the strip has to scroll. Watch it travel in from the edge, cross the whole screen, and keep going until the line finishes. The size, speed, and background you picked are what you are looking at here.</string>
+    <string name="rule_off_info">If silence stays on after leaving a chosen app, this turns the quiet rule off.</string>
+    <string name="rule_off_info_action">Explain the quiet rule</string>
+    <string name="about_title">About</string>
+    <string name="about_summary">While a chosen app is in front, ordinary alerts go silent and scroll by as a ribbon.</string>
     <string name="turn_rule_off">Turn the quiet rule off now</string>
 
     <string name="rule_saved">Quiet rule id: saved</string>
