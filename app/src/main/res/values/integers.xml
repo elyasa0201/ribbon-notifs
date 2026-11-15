@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <integer name="rule_instance_limit">1</integer>
+    <!-- Conversations | alerting | silent. Silent is required once Do Not Disturb demotes an alert. -->
+    <integer name="listener_filter_types">7</integer>
 </resources>

@@ -11,7 +11,7 @@
     <string name="master_blocked">The switch stays off until notification access, Do Not Disturb access, and display over other apps are all granted.</string>
 
     <string name="perm_notification">Notification access</string>
-    <string name="perm_notification_why">Reads the title and text for the strip. When the notification access screen shows toggles, leave alerting and conversations on for Ribbon Notifs.</string>
+    <string name="perm_notification_why">Reads the title and text for the strip. When the notification access screen shows toggles, leave alerting, silent, and conversations on for Ribbon Notifs.</string>
     <string name="perm_policy">Do Not Disturb access</string>
     <string name="perm_policy_why">Lets Ribbon Notifs hide banners for ordinary alerts. Those alerts stay in the shade, without sound or vibration.</string>
     <string name="perm_overlay">Display over other apps</string>
@@ -60,6 +60,11 @@
     <string name="about_title">About</string>
     <string name="about_summary">While a chosen app is in front, ordinary alerts go silent and scroll by as a ribbon.</string>
     <string name="turn_rule_off">Turn the quiet rule off now</string>
+    <string name="debug_title">Notification debug</string>
+    <string name="debug_summary">Records why each alert was shown or skipped. Message text is not included.</string>
+    <string name="debug_share">Share log</string>
+    <string name="debug_share_subject">Ribbon Notifs notification log</string>
+    <string name="debug_empty">No notifications recorded yet.</string>
 
     <string name="rule_saved">Quiet rule id: saved</string>
     <string name="rule_not_saved">Quiet rule id: not saved</string>

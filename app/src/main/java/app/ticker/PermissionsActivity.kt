@@ -16,6 +16,7 @@ class PermissionsActivity : android.app.Activity() {
     private lateinit var blocked: TextView
     private lateinit var warning: TextView
     private lateinit var status: TextView
+    private lateinit var debugLog: TextView
     private val states = ArrayList<TextView>()
     private var rendering = false
 
@@ -32,6 +33,7 @@ class PermissionsActivity : android.app.Activity() {
         blocked = findViewById(R.id.master_blocked)
         warning = findViewById(R.id.policy_warning)
         status = findViewById(R.id.rule_status)
+        debugLog = findViewById(R.id.debug_log)
         master.setOnCheckedChangeListener { _, checked ->
             if (rendering) return@setOnCheckedChangeListener
             controller.setMasterEnabled(checked)
@@ -46,6 +48,9 @@ class PermissionsActivity : android.app.Activity() {
                 .setMessage(R.string.rule_off_info)
                 .setPositiveButton(android.R.string.ok, null)
                 .show()
+        }
+        findViewById<View>(R.id.share_debug).setOnClickListener {
+            DecisionLog.share(this)
         }
         val rows = listOf(
             Perm(R.string.perm_notification, R.string.perm_notification_why) { openNotificationAccess(this) },
@@ -104,6 +109,7 @@ class PermissionsActivity : android.app.Activity() {
         val active = if (controller.isRuleActive) getString(R.string.rule_active) else getString(R.string.rule_inactive)
         val extra = if (controller.ruleCreateFailed) "\n${getString(R.string.rule_create_failed)}" else ""
         status.text = "$saved\n$active$extra"
+        debugLog.text = DecisionLog.recent(this, 12) ?: getString(R.string.debug_empty)
     }
 
     private data class Perm(

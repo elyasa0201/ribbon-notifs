@@ -56,13 +56,20 @@ internal class TickerController(private val app: Context) {
     private var listenerConnected = false
     private var armed = false
     private var ruleActive = false
+    private var rulePending = false
     private var suppressRearm = false
     private var updatesDisabled = false
     private var currentForeground: String? = null
     private var showing: Line? = null
     private var ruleError = false
+    private var typeRepairAttempted = false
+    private var updateWarned = false
+    private var usageWarned = false
     private var pollThread: HandlerThread? = null
     private var pollHandler: Handler? = null
+    private var lastPostedKey: String? = null
+    private var lastPostedWhen = Long.MIN_VALUE
+    private val postedLock = Any()
 
     val masterEnabled: Boolean get() = prefs.masterEnabled
     val ruleSaved: Boolean get() = prefs.ruleId != null
@@ -160,7 +167,7 @@ internal class TickerController(private val app: Context) {
 
     fun previewStrip(): Boolean {
         if (!Grants.overlay(app)) return false
-        enqueue(Line(app.getString(R.string.preview_line), preview = true))
+        enqueue(Line(app.getString(R.string.preview_line), preview = true, packageName = null))
         return true
     }
 
@@ -182,34 +189,83 @@ internal class TickerController(private val app: Context) {
         armed = false
         clearStrip()
         setRuleState(active = false, reason = "listener disconnected", force = true)
-        changed()
+        note("listener disconnected ${contextLine()}")
     }
 
-    fun onNotificationPosted(sbn: StatusBarNotification, rankingMap: RankingMap) {
-        if (!armed) return
-        if (sbn.packageName == app.packageName) return
-        if (sbn.packageName == currentForeground) return
-        val notification = sbn.notification ?: return
+    fun onNotificationPosted(sbn: StatusBarNotification, rankingMap: RankingMap?) {
+        val stamp = sbn.postTime
+        synchronized(postedLock) {
+            if (sbn.key == lastPostedKey && stamp == lastPostedWhen) return
+            lastPostedKey = sbn.key
+            lastPostedWhen = stamp
+        }
+
+        val pkg = sbn.packageName
+        fun skip(reason: String) {
+            note("skip pkg=$pkg ${contextLine()} reason=$reason")
+        }
+
+        if (!armed) {
+            skip("not-armed")
+            return
+        }
+        if (pkg == app.packageName) {
+            skip("own-package")
+            return
+        }
+        if (pkg == currentForeground) {
+            skip("foreground-app")
+            return
+        }
+        val notification = sbn.notification
+        if (notification == null) {
+            skip("empty")
+            return
+        }
         val flags = notification.flags
-        if ((flags and Notification.FLAG_ONGOING_EVENT) != 0) return
-        if ((flags and Notification.FLAG_FOREGROUND_SERVICE) != 0) return
-        if ((flags and Notification.FLAG_GROUP_SUMMARY) != 0) return
-        if (isMediaStyle(notification)) return
+        if ((flags and Notification.FLAG_ONGOING_EVENT) != 0) {
+            skip("ongoing")
+            return
+        }
+        if ((flags and Notification.FLAG_FOREGROUND_SERVICE) != 0) {
+            skip("foreground-service")
+            return
+        }
+        if ((flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
+            skip("group-summary")
+            return
+        }
+        if (isMediaStyle(notification)) {
+            skip("media")
+            return
+        }
         val ranking = Ranking()
-        if (!rankingMap.getRanking(sbn.key, ranking)) return
-        if (ranking.importance < NotificationManager.IMPORTANCE_HIGH) return
-        if (BuildConfig.DEBUG) {
-            val peek = (ranking.suppressedVisualEffects and
-                NotificationManager.Policy.SUPPRESSED_EFFECT_PEEK) != 0
-            Log.i(
-                TAG,
-                "alert pkg=${sbn.packageName} importance=${ranking.importance} peekSuppressed=$peek"
-            )
+        val ranked = try {
+            rankingMap?.getRanking(sbn.key, ranking) == true
+        } catch (_: RuntimeException) {
+            false
+        }
+        if (!ranked) {
+            skip("no-ranking")
+            return
+        }
+        val channelImportance = ranking.channel?.importance
+        val peek = (ranking.suppressedVisualEffects and
+            NotificationManager.Policy.SUPPRESSED_EFFECT_PEEK) != 0
+        if (!ordinaryAlert(ranking.importance, channelImportance, peek)) {
+            val channel = channelImportance ?: -1
+            skip("below-importance rank=${ranking.importance} channel=$channel peek=$peek")
+            return
         }
         val extras = notification.extras
         val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
         val body = messageBody(extras)
-        enqueue(Line(TickerText.line(appLabel(sbn.packageName), title, body), preview = false))
+        val channel = channelImportance ?: -1
+        note(
+            "accept pkg=$pkg ${contextLine()} reason=shown " +
+                "rank=${ranking.importance} channel=$channel peek=$peek"
+        )
+        enqueue(Line(TickerText.line(appLabel(pkg), title, body), preview = false, packageName = pkg))
     }
 
     private fun registerReceivers() {
@@ -273,33 +329,32 @@ internal class TickerController(private val app: Context) {
             NotificationManager.AUTOMATIC_RULE_STATUS_REMOVED -> {
                 prefs.ruleId = null
                 ruleActive = false
+                rulePending = false
                 suppressRearm = false
                 updatesDisabled = false
                 ruleError = false
                 if (Grants.policy(app)) ensureRule()
-                debug("rule removed")
             }
             NotificationManager.AUTOMATIC_RULE_STATUS_DEACTIVATED -> {
                 // The user snoozed the mode. Further STATE_TRUE calls are ignored
                 // until this app sends STATE_FALSE, which happens on leaving.
                 ruleActive = false
+                rulePending = false
                 suppressRearm = true
-                debug("rule snoozed")
             }
             NotificationManager.AUTOMATIC_RULE_STATUS_DISABLED -> {
                 ruleActive = false
+                rulePending = false
                 updatesDisabled = true
                 suppressRearm = true
-                debug("rule disabled")
             }
-            NotificationManager.AUTOMATIC_RULE_STATUS_ENABLED -> {
-                updatesDisabled = false
-                debug("rule enabled")
+            NotificationManager.AUTOMATIC_RULE_STATUS_ENABLED -> updatesDisabled = false
+            NotificationManager.AUTOMATIC_RULE_STATUS_ACTIVATED -> {
+                ruleActive = true
+                rulePending = false
             }
-            NotificationManager.AUTOMATIC_RULE_STATUS_ACTIVATED -> ruleActive = true
-            else -> debug("rule status $status")
         }
-        changed()
+        note("zen ${zenStatusName(status)} ${contextLine()}")
     }
 
     private fun startPolling() {
@@ -353,23 +408,40 @@ internal class TickerController(private val app: Context) {
         }
         // Null is the direct-boot case: the user has not unlocked since boot.
         if (events == null) {
-            debug("usage events null")
+            if (!usageWarned) {
+                usageWarned = true
+                note("usage unavailable ${contextLine()} reason=locked")
+            }
             return ForegroundRead.Unavailable
         }
+        usageWarned = false
+        val open = LinkedHashMap<String, OpenActivity>()
         val event = UsageEvents.Event()
-        var bestPackage: String? = null
-        var bestTime = Long.MIN_VALUE
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
-            if (event.eventType != UsageEvents.Event.ACTIVITY_RESUMED) continue
             val packageName = event.packageName ?: continue
             if (packageName.isEmpty()) continue
-            if (event.timeStamp >= bestTime) {
-                bestTime = event.timeStamp
-                bestPackage = packageName
+            val className = event.className.orEmpty()
+            when (event.eventType) {
+                UsageEvents.Event.ACTIVITY_RESUMED -> {
+                    val key = if (className.isEmpty()) packageName else "$packageName/$className"
+                    open[key] = OpenActivity(packageName, event.timeStamp)
+                }
+                UsageEvents.Event.ACTIVITY_PAUSED,
+                UsageEvents.Event.ACTIVITY_STOPPED -> {
+                    if (className.isEmpty()) {
+                        val iterator = open.entries.iterator()
+                        while (iterator.hasNext()) {
+                            if (iterator.next().value.packageName == packageName) iterator.remove()
+                        }
+                    } else {
+                        open.remove("$packageName/$className")
+                    }
+                }
             }
         }
-        return ForegroundRead.Known(bestPackage)
+        val best = open.values.maxByOrNull { it.time }?.packageName
+        return ForegroundRead.Known(best)
     }
 
     private fun applyForeground(packageName: String?) {
@@ -387,19 +459,19 @@ internal class TickerController(private val app: Context) {
             if (!ruleActive && !suppressRearm && !updatesDisabled) {
                 if (prefs.ruleId == null && Grants.policy(app)) ensureRule()
                 setRuleState(active = true, reason = "foreground", force = false)
+            } else if (entered && suppressRearm) {
+                note("silence held ${contextLine()} reason=snoozed")
+            } else if (entered && updatesDisabled) {
+                note("silence held ${contextLine()} reason=disabled")
             }
-            if (entered) {
-                debug("armed")
-                changed()
-            }
+            if (entered) note("armed ${contextLine()}")
         } else if (armed || ruleActive || suppressRearm) {
             armed = false
             currentForeground = packageName
             suppressRearm = false
             setRuleState(active = false, reason = "left foreground", force = false)
             dropAlertLines()
-            debug("disarmed")
-            changed()
+            note("disarmed ${contextLine()} reason=left")
         } else {
             currentForeground = packageName
         }
@@ -417,16 +489,48 @@ internal class TickerController(private val app: Context) {
                 return
             }
             if (existing != null) {
+                val fresh = buildRule()
                 val updated = try {
-                    manager.updateAutomaticZenRule(saved, buildRule())
+                    manager.updateAutomaticZenRule(saved, fresh)
                 } catch (_: RuntimeException) {
                     false
                 }
-                if (!updated) debug("rule update declined")
-                ruleError = false
-                return
+                val after = if (updated) readRule(manager, saved) else existing
+                val typeWrong = ruleTypeWrong(after)
+                if (updated) {
+                    ruleError = false
+                    if (typeWrong && !typeRepairAttempted) {
+                        typeRepairAttempted = true
+                        note("rule type unchanged ${contextLine()} reason=immersive-type")
+                    }
+                    return
+                }
+                if (typeWrong && !typeRepairAttempted) {
+                    typeRepairAttempted = true
+                    val removed = try {
+                        manager.removeAutomaticZenRule(saved)
+                        true
+                    } catch (_: RuntimeException) {
+                        false
+                    }
+                    if (!removed) {
+                        ruleError = true
+                        note("rule replace failed ${contextLine()} reason=immersive-type")
+                        return
+                    }
+                    prefs.ruleId = null
+                    note("rule replaced ${contextLine()} reason=immersive-type")
+                } else {
+                    if (!updateWarned) {
+                        updateWarned = true
+                        note("rule update declined ${contextLine()}")
+                    }
+                    ruleError = false
+                    return
+                }
+            } else {
+                prefs.ruleId = null
             }
-            prefs.ruleId = null
         }
         val created = try {
             manager.addAutomaticZenRule(buildRule())
@@ -435,21 +539,47 @@ internal class TickerController(private val app: Context) {
         }
         if (created.isNullOrEmpty()) {
             ruleError = true
-            debug("rule create failed")
+            note("rule create failed ${contextLine()}")
         } else {
             prefs.ruleId = created
             ruleError = false
-            debug("rule created")
+            note("rule created ${contextLine()}")
         }
     }
 
+    private fun readRule(manager: NotificationManager, id: String): AutomaticZenRule? {
+        return try {
+            manager.getAutomaticZenRule(id)
+        } catch (_: RuntimeException) {
+            null
+        }
+    }
+
+    private fun ruleTypeWrong(rule: AutomaticZenRule?): Boolean {
+        if (rule == null || Build.VERSION.SDK_INT < 35) return false
+        return rule.type != AutomaticZenRule.TYPE_IMMERSIVE
+    }
+
     private fun buildRule(): AutomaticZenRule {
+        val name = app.getString(R.string.rule_name)
+        val condition = conditionId()
+        val policy = zenPolicy()
+        val owner = ComponentName(app, RuleExplanationActivity::class.java)
+        if (Build.VERSION.SDK_INT >= 35) {
+            return AutomaticZenRule.Builder(name, condition)
+                .setConfigurationActivity(owner)
+                .setZenPolicy(policy)
+                .setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
+                .setEnabled(true)
+                .setType(AutomaticZenRule.TYPE_IMMERSIVE)
+                .build()
+        }
         return AutomaticZenRule(
-            app.getString(R.string.rule_name),
+            name,
             null,
-            ComponentName(app, RuleExplanationActivity::class.java),
-            conditionId(),
-            zenPolicy(),
+            owner,
+            condition,
+            policy,
             NotificationManager.INTERRUPTION_FILTER_PRIORITY,
             true
         )
@@ -504,13 +634,13 @@ internal class TickerController(private val app: Context) {
             manager.setAutomaticZenRuleState(id, condition)
         } catch (_: SecurityException) {
             ruleActive = false
-            debug("rule state denied ($reason)")
+            note("rule denied ${contextLine()} reason=$reason")
             return
         } catch (_: IllegalArgumentException) {
             prefs.ruleId = null
             ruleActive = false
             ruleError = true
-            debug("rule id rejected ($reason)")
+            note("rule id rejected ${contextLine()} reason=$reason")
             return
         }
         if (active && Build.VERSION.SDK_INT >= 35) {
@@ -519,15 +649,20 @@ internal class TickerController(private val app: Context) {
             } catch (_: SecurityException) {
                 Condition.STATE_UNKNOWN
             }
+            // Samsung applies the condition after this call returns. A state
+            // that is not TRUE yet is not a snooze. Retry on the next poll.
             if (actual != Condition.STATE_TRUE) {
                 ruleActive = false
-                suppressRearm = true
-                debug("rule on ignored ($reason)")
+                if (!rulePending) {
+                    rulePending = true
+                    note("rule pending actual=$actual ${contextLine()} reason=$reason")
+                }
                 return
             }
         }
+        rulePending = false
         ruleActive = active
-        debug("rule ${if (active) "on" else "off"} ($reason)")
+        note("rule ${if (active) "on" else "off"} ${contextLine()} reason=$reason")
     }
 
     private fun conditionId(): Uri = Uri.parse("condition://${app.packageName}/armed")
@@ -551,11 +686,24 @@ internal class TickerController(private val app: Context) {
             val next = queue.first()
             if (!next.preview && !armed) {
                 queue.removeFirst()
+                note("skip pkg=${next.packageName ?: "-"} ${contextLine()} reason=not-armed")
                 continue
             }
-            if (!canShowOnStrip()) return
+            if (!canShowOnStrip()) {
+                if (!next.blockLogged && !next.preview) {
+                    next.blockLogged = true
+                    note("skip pkg=${next.packageName ?: "-"} ${contextLine()} reason=screen-or-lock")
+                }
+                return
+            }
             val shown = overlay.show(next.text, currentAppearance()) { main.post { onLineFinished() } }
-            if (!shown) return
+            if (!shown) {
+                if (!next.blockLogged && !next.preview) {
+                    next.blockLogged = true
+                    note("skip pkg=${next.packageName ?: "-"} ${contextLine()} reason=overlay")
+                }
+                return
+            }
             queue.removeFirst()
             showing = next
             return
@@ -670,7 +818,52 @@ internal class TickerController(private val app: Context) {
         if (BuildConfig.DEBUG) Log.i(TAG, message)
     }
 
-    private data class Line(val text: String, val preview: Boolean)
+    private fun note(message: String) {
+        DecisionLog.note(app, message)
+        changed()
+    }
+
+    private fun contextLine(): String {
+        return "armed=$armed fg=${currentForeground ?: "-"} listener=$listenerConnected rule=${ruleStateLabel()}"
+    }
+
+    private fun ruleStateLabel(): String {
+        val saved = if (prefs.ruleId == null) "unsaved" else "saved"
+        val active = if (ruleActive) "active" else "inactive"
+        val flags = ArrayList<String>()
+        if (suppressRearm) flags.add("snoozed")
+        if (updatesDisabled) flags.add("disabled")
+        if (ruleError) flags.add("error")
+        val extra = if (flags.isEmpty()) "" else " " + flags.joinToString(",")
+        return "$saved/$active$extra"
+    }
+
+    private fun zenStatusName(status: Int): String {
+        return when (status) {
+            NotificationManager.AUTOMATIC_RULE_STATUS_REMOVED -> "removed"
+            NotificationManager.AUTOMATIC_RULE_STATUS_DEACTIVATED -> "deactivated"
+            NotificationManager.AUTOMATIC_RULE_STATUS_DISABLED -> "disabled"
+            NotificationManager.AUTOMATIC_RULE_STATUS_ENABLED -> "enabled"
+            NotificationManager.AUTOMATIC_RULE_STATUS_ACTIVATED -> "activated"
+            else -> status.toString()
+        }
+    }
+
+    private fun ordinaryAlert(rank: Int, channel: Int?, peekSuppressed: Boolean): Boolean {
+        if (rank >= NotificationManager.IMPORTANCE_HIGH) return true
+        if (channel != null && channel >= NotificationManager.IMPORTANCE_HIGH) return true
+        return channel == null && peekSuppressed
+    }
+
+    private class Line(
+        val text: String,
+        val preview: Boolean,
+        val packageName: String?
+    ) {
+        var blockLogged = false
+    }
+
+    private data class OpenActivity(val packageName: String, val time: Long)
 
     private sealed class ForegroundRead {
         data class Known(val packageName: String?) : ForegroundRead()
