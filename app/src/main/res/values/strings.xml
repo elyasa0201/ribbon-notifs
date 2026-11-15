@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">Ribbon Notifs</string>
     <string name="rule_name">Ribbon Notifs</string>
+    <string name="rule_trigger">While a chosen app is in front</string>
 
     <string name="setup_title">Ribbon Notifs</string>
     <string name="setup_intro">While a chosen app is open, banners are replaced by a scrolling line, and the alerts stay in the shade.</string>

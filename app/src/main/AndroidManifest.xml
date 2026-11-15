@@ -71,5 +71,24 @@
                 android:name="android.service.notification.default_filter_types"
                 android:value="@integer/listener_filter_types" />
         </service>
+
+        <service
+            android:name=".TickerConditionService"
+            android:exported="true"
+            android:label="@string/rule_name"
+            android:permission="android.permission.BIND_CONDITION_PROVIDER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.ConditionProviderService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.zen.automatic.ruleType"
+                android:value="@string/rule_name" />
+            <meta-data
+                android:name="android.service.zen.automatic.ruleInstanceLimit"
+                android:value="@integer/rule_instance_limit" />
+            <meta-data
+                android:name="android.service.zen.automatic.configurationActivity"
+                android:value="app.ticker.RuleExplanationActivity" />
+        </service>
     </application>
 </manifest>

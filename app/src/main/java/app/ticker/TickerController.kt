@@ -62,14 +62,17 @@ internal class TickerController(private val app: Context) {
     private var currentForeground: String? = null
     private var showing: Line? = null
     private var ruleError = false
-    private var typeRepairAttempted = false
     private var updateWarned = false
     private var usageWarned = false
+    private var lastCreateFailure: String? = null
     private var pollThread: HandlerThread? = null
     private var pollHandler: Handler? = null
     private var lastPostedKey: String? = null
     private var lastPostedWhen = Long.MIN_VALUE
     private val postedLock = Any()
+
+    internal var ruleDesired: Boolean = false
+        private set
 
     val masterEnabled: Boolean get() = prefs.masterEnabled
     val ruleSaved: Boolean get() = prefs.ruleId != null
@@ -484,105 +487,196 @@ internal class TickerController(private val app: Context) {
         if (saved != null) {
             val existing = try {
                 manager.getAutomaticZenRule(saved)
-            } catch (_: RuntimeException) {
+            } catch (error: RuntimeException) {
                 ruleError = true
+                noteCreate("rule read failed ${contextLine()} ${failureText(error)}")
                 return
             }
             if (existing != null) {
-                val fresh = buildRule()
+                val shape = prefs.ruleShape?.let { storedShape(it) } ?: inferShape(existing)
                 val updated = try {
-                    manager.updateAutomaticZenRule(saved, fresh)
-                } catch (_: RuntimeException) {
-                    false
-                }
-                val after = if (updated) readRule(manager, saved) else existing
-                val typeWrong = ruleTypeWrong(after)
-                if (updated) {
-                    ruleError = false
-                    if (typeWrong && !typeRepairAttempted) {
-                        typeRepairAttempted = true
-                        note("rule type unchanged ${contextLine()} reason=immersive-type")
-                    }
-                    return
-                }
-                if (typeWrong && !typeRepairAttempted) {
-                    typeRepairAttempted = true
-                    val removed = try {
-                        manager.removeAutomaticZenRule(saved)
-                        true
-                    } catch (_: RuntimeException) {
-                        false
-                    }
-                    if (!removed) {
-                        ruleError = true
-                        note("rule replace failed ${contextLine()} reason=immersive-type")
-                        return
-                    }
-                    prefs.ruleId = null
-                    note("rule replaced ${contextLine()} reason=immersive-type")
-                } else {
+                    manager.updateAutomaticZenRule(saved, buildRule(shape, ruleTypes().first()))
+                } catch (error: RuntimeException) {
                     if (!updateWarned) {
                         updateWarned = true
-                        note("rule update declined ${contextLine()}")
+                        note("rule update failed ${contextLine()} ${failureText(error)}")
                     }
                     ruleError = false
                     return
                 }
-            } else {
-                prefs.ruleId = null
+                if (!updated && !updateWarned) {
+                    updateWarned = true
+                    note("rule update declined ${contextLine()} userManaged=${zenRulesUserManaged()}")
+                }
+                ruleError = false
+                return
             }
+            prefs.ruleId = null
         }
-        val created = try {
-            manager.addAutomaticZenRule(buildRule())
-        } catch (_: RuntimeException) {
-            null
+        findOwnedRule(manager)?.let { adopted ->
+            prefs.ruleId = adopted
+            ruleError = false
+            noteCreate("rule adopted ${contextLine()} userManaged=${zenRulesUserManaged()}")
+            return
+        }
+        val problems = ArrayList<String>()
+        var created: String? = null
+        var used: RuleShape? = null
+        for (type in ruleTypes()) {
+            for (shape in RuleShape.entries) {
+                val label = "${shape.wire}/$type"
+                try {
+                    val id = manager.addAutomaticZenRule(buildRule(shape, type))
+                    if (!id.isNullOrEmpty()) {
+                        created = id
+                        used = shape
+                        break
+                    }
+                    problems.add("$label:returned-null")
+                } catch (error: RuntimeException) {
+                    problems.add("$label:${failureText(error)}")
+                }
+                findOwnedRule(manager)?.let { adopted ->
+                    prefs.ruleId = adopted
+                    prefs.ruleShape = shape.wire
+                    ruleError = false
+                    noteCreate(
+                        "rule adopted ${contextLine()} via=$label " +
+                            "userManaged=${zenRulesUserManaged()} ${problems.joinToString(" | ")}"
+                    )
+                    return
+                }
+            }
+            if (created != null) break
         }
         if (created.isNullOrEmpty()) {
             ruleError = true
-            note("rule create failed ${contextLine()}")
+            noteCreate(
+                "rule create failed ${contextLine()} userManaged=${zenRulesUserManaged()} " +
+                    problems.joinToString(" | ")
+            )
         } else {
             prefs.ruleId = created
+            prefs.ruleShape = used?.wire
             ruleError = false
-            note("rule created ${contextLine()}")
+            lastCreateFailure = null
+            note("rule created ${contextLine()} via=${used?.wire} userManaged=${zenRulesUserManaged()}")
         }
     }
 
-    private fun readRule(manager: NotificationManager, id: String): AutomaticZenRule? {
-        return try {
-            manager.getAutomaticZenRule(id)
+    private fun findOwnedRule(manager: NotificationManager): String? {
+        val rules = try {
+            manager.automaticZenRules
         } catch (_: RuntimeException) {
-            null
+            return null
+        } ?: return null
+        val condition = conditionId()
+        val activity = configurationActivity()
+        val provider = conditionProvider()
+        return rules.entries.firstOrNull { (_, rule) ->
+            rule.conditionId == condition ||
+                rule.configurationActivity == activity ||
+                rule.owner == provider
+        }?.key
+    }
+
+    private fun ruleTypes(): IntArray {
+        return if (Build.VERSION.SDK_INT >= 35) {
+            intArrayOf(AutomaticZenRule.TYPE_OTHER, AutomaticZenRule.TYPE_IMMERSIVE)
+        } else {
+            intArrayOf(0)
         }
     }
 
-    private fun ruleTypeWrong(rule: AutomaticZenRule?): Boolean {
-        if (rule == null || Build.VERSION.SDK_INT < 35) return false
-        return rule.type != AutomaticZenRule.TYPE_IMMERSIVE
-    }
-
-    private fun buildRule(): AutomaticZenRule {
+    private fun buildRule(shape: RuleShape, type: Int): AutomaticZenRule {
         val name = app.getString(R.string.rule_name)
         val condition = conditionId()
         val policy = zenPolicy()
-        val owner = ComponentName(app, RuleExplanationActivity::class.java)
+        val activity = configurationActivity()
+        val provider = conditionProvider()
+        // TYPE_UNKNOWN is rejected once the app targets Android 15 or higher, and One UI
+        // still refuses a rule that has no condition-provider owner. Try a normal app
+        // rule first, then a provider-owned one.
         if (Build.VERSION.SDK_INT >= 35) {
-            return AutomaticZenRule.Builder(name, condition)
-                .setConfigurationActivity(owner)
+            val builder = AutomaticZenRule.Builder(name, condition)
                 .setZenPolicy(policy)
                 .setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
                 .setEnabled(true)
-                .setType(AutomaticZenRule.TYPE_IMMERSIVE)
-                .build()
+                .setType(type)
+                .setTriggerDescription(app.getString(R.string.rule_trigger))
+            if (shape != RuleShape.OWNER) builder.setConfigurationActivity(activity)
+            if (shape != RuleShape.ACTIVITY) builder.setOwner(provider)
+            return builder.build()
         }
+        val owner = if (shape == RuleShape.ACTIVITY) null else provider
+        val config = if (shape == RuleShape.OWNER) null else activity
         return AutomaticZenRule(
             name,
-            null,
             owner,
+            config,
             condition,
             policy,
             NotificationManager.INTERRUPTION_FILTER_PRIORITY,
             true
         )
+    }
+
+    private fun configurationActivity(): ComponentName {
+        return ComponentName(app, RuleExplanationActivity::class.java)
+    }
+
+    private fun conditionProvider(): ComponentName {
+        return ComponentName(app, TickerConditionService::class.java)
+    }
+
+    private fun inferShape(rule: AutomaticZenRule): RuleShape {
+        val hasOwner = rule.owner != null
+        val hasActivity = rule.configurationActivity != null
+        return when {
+            hasOwner && hasActivity -> RuleShape.BOTH
+            hasOwner -> RuleShape.OWNER
+            else -> RuleShape.ACTIVITY
+        }
+    }
+
+    private fun storedShape(value: String): RuleShape {
+        return RuleShape.entries.firstOrNull { it.wire == value } ?: RuleShape.ACTIVITY
+    }
+
+    private fun zenRulesUserManaged(): String {
+        if (Build.VERSION.SDK_INT < 35) return "n/a"
+        val manager = notificationManager() ?: return "n/a"
+        return try {
+            manager.areAutomaticZenRulesUserManaged().toString()
+        } catch (error: RuntimeException) {
+            failureText(error)
+        }
+    }
+
+    private fun failureText(error: Throwable): String {
+        val parts = ArrayList<String>()
+        var current: Throwable? = error
+        var guard = 0
+        while (current != null && guard < 3) {
+            val message = current.message?.replace('\n', ' ')?.replace('\r', ' ')?.trim()
+            val name = current.javaClass.simpleName.ifEmpty { current.javaClass.name }
+            parts.add(if (message.isNullOrEmpty()) name else "$name: $message")
+            current = current.cause
+            guard += 1
+        }
+        return parts.joinToString(" caused by ").take(400)
+    }
+
+    private fun noteCreate(message: String) {
+        if (message == lastCreateFailure) return
+        lastCreateFailure = message
+        note(message)
+    }
+
+    private enum class RuleShape(val wire: String) {
+        ACTIVITY("activity"),
+        OWNER("owner"),
+        BOTH("both")
     }
 
     private fun zenPolicy(): ZenPolicy {
@@ -613,11 +707,16 @@ internal class TickerController(private val app: Context) {
 
     private fun setRuleState(active: Boolean, reason: String, force: Boolean) {
         if (updatesDisabled && !force) {
-            if (!active) ruleActive = false
+            if (!active) {
+                ruleDesired = false
+                ruleActive = false
+            }
             return
         }
+        ruleDesired = active
         val id = prefs.ruleId ?: run {
             ruleActive = false
+            TickerConditionService.publish()
             return
         }
         if (!Grants.policy(app)) {
@@ -632,17 +731,18 @@ internal class TickerController(private val app: Context) {
         val condition = Condition(conditionId(), summary, state)
         try {
             manager.setAutomaticZenRuleState(id, condition)
-        } catch (_: SecurityException) {
+        } catch (error: SecurityException) {
             ruleActive = false
-            note("rule denied ${contextLine()} reason=$reason")
+            note("rule denied ${contextLine()} reason=$reason ${failureText(error)}")
             return
-        } catch (_: IllegalArgumentException) {
+        } catch (error: IllegalArgumentException) {
             prefs.ruleId = null
             ruleActive = false
             ruleError = true
-            note("rule id rejected ${contextLine()} reason=$reason")
+            note("rule id rejected ${contextLine()} reason=$reason ${failureText(error)}")
             return
         }
+        TickerConditionService.publish()
         if (active && Build.VERSION.SDK_INT >= 35) {
             val actual = try {
                 manager.getAutomaticZenRuleState(id)

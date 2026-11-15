@@ -17,6 +17,12 @@ internal class TickerPrefs(context: Context) {
             prefs.edit().putString(KEY_RULE, value).apply()
         }
 
+    var ruleShape: String?
+        get() = prefs.getString(KEY_RULE_SHAPE, null)?.takeIf { it.isNotEmpty() }
+        set(value) {
+            prefs.edit().putString(KEY_RULE_SHAPE, value).apply()
+        }
+
     var selectedPackages: Set<String>
         get() = prefs.getStringSet(KEY_PACKAGES, emptySet())?.toSet() ?: emptySet()
         set(value) {
@@ -69,6 +75,7 @@ internal class TickerPrefs(context: Context) {
         const val NAME = "ticker"
         const val KEY_MASTER = "master_enabled"
         const val KEY_RULE = "zen_rule_id"
+        const val KEY_RULE_SHAPE = "zen_rule_shape"
         const val KEY_PACKAGES = "selected_packages"
         const val KEY_TEXT = "strip_text_sp"
         const val KEY_SPEED = "strip_speed_dp"
