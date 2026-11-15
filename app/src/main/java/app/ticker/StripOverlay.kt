@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Point
 import android.graphics.Typeface
 import android.hardware.display.DisplayManager
 import android.os.Build
@@ -12,6 +13,7 @@ import android.provider.Settings
 import android.util.Log
 import android.view.Display
 import android.view.Gravity
+import android.view.Surface
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
@@ -19,6 +21,10 @@ import android.view.WindowManager
 /**
  * One non-touchable line under the status bar. The window flags are what let
  * taps fall through; the view itself never asks for focus.
+ *
+ * The window is pinned to the current display's full width. Immersive video
+ * would otherwise inset the overlay to a sliver on the side, and the line
+ * would not travel until that inset went away.
  */
 internal data class StripAppearance(
     val textSizeSp: Int = DEFAULT_TEXT_SP,
@@ -60,7 +66,11 @@ internal class StripOverlay(private val app: Context) {
     private var view: StripView? = null
     private var params: WindowManager.LayoutParams? = null
     private var displayId: Int = Display.INVALID_DISPLAY
+    private var rotation: Int = Surface.ROTATION_0
     private var appearance = StripAppearance()
+    private var placeGeneration = 0
+    private var alignAttempts = 0
+    private var awaitingLayout = false
 
     fun isShowing(): Boolean = view != null
 
@@ -68,13 +78,18 @@ internal class StripOverlay(private val app: Context) {
         this.appearance = appearance
         if (!Settings.canDrawOverlays(app)) return false
         val display = activeDisplay() ?: return false
-        if (view == null || display.displayId != displayId) {
+        if (view == null || display.displayId != displayId || display.rotation != rotation) {
             remove()
             if (!add(display)) return false
         }
         applyAppearance(appearance)
         val strip = view ?: return false
+        val span = windowManager?.let { displaySpan(display, it) }
+        if (span != null) strip.expectedWidth = span.width
+        strip.holdForWidth = strip.width <= 0 ||
+            (strip.expectedWidth > 0 && strip.width * 2 < strip.expectedWidth)
         strip.show(text, onFinished)
+        schedulePlace()
         return true
     }
 
@@ -97,20 +112,22 @@ internal class StripOverlay(private val app: Context) {
 
     fun relayout() {
         if (view == null) return
-        val display = activeDisplay()
-        if (display != null && display.displayId != displayId) {
+        val display = activeDisplay() ?: return
+        if (display.displayId != displayId || display.rotation != rotation) {
             val strip = view ?: return
             val text = strip.currentText
             val finished = strip.finishCallback
+            val kept = strip.scrollOffset
             remove()
             if (text.isNotEmpty() && finished != null && add(display)) {
                 view?.applyAppearance(appearance)
                 view?.show(text, finished)
+                view?.restoreOffset(kept)
             } else {
                 finished?.invoke()
             }
         } else {
-            updateOffset()
+            schedulePlace()
         }
     }
 
@@ -122,6 +139,7 @@ internal class StripOverlay(private val app: Context) {
         windowManager = null
         windowContext = null
         displayId = Display.INVALID_DISPLAY
+        awaitingLayout = false
         if (current != null && manager != null) {
             try {
                 manager.removeView(current)
@@ -132,42 +150,58 @@ internal class StripOverlay(private val app: Context) {
     }
 
     private fun add(display: Display): Boolean {
+        if (attach(display, beyondScreen = true)) return true
+        return attach(display, beyondScreen = false)
+    }
+
+    private fun attach(display: Display, beyondScreen: Boolean): Boolean {
         return try {
             val context = windowContextFor(display)
             val manager = context.getSystemService(WindowManager::class.java) ?: return false
+            val span = displaySpan(display, manager)
             val density = context.resources.displayMetrics.density
             val height = stripHeight(density, appearance.textSizeSp)
+            var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+            if (beyondScreen) {
+                flags = flags or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            }
             val layout = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
+                span.width,
                 height,
                 WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                flags,
                 PixelFormat.TRANSLUCENT
             ).apply {
-                gravity = Gravity.TOP or Gravity.START
-                y = statusBarInset(manager)
+                gravity = Gravity.TOP or Gravity.LEFT
+                x = 0
+                y = statusBarInset(manager, context, span)
                 if (Build.VERSION.SDK_INT >= 28) {
                     layoutInDisplayCutoutMode =
                         WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
                 }
+                if (Build.VERSION.SDK_INT >= 30) {
+                    // Keep the top and bottom system bars, so the line stays
+                    // under the status bar. Left and right insets are what
+                    // collapse the window during landscape fullscreen video.
+                    setFitInsetsTypes(WindowInsets.Type.systemBars())
+                    setFitInsetsSides(WindowInsets.Side.TOP or WindowInsets.Side.BOTTOM)
+                    setFitInsetsIgnoringVisibility(false)
+                }
                 title = "Ribbon Notifs"
             }
             val strip = StripView(context)
+            strip.expectedWidth = span.width
             strip.applyAppearance(appearance)
+            strip.fitsSystemWindows = false
             strip.setOnApplyWindowInsetsListener { _, insets ->
-                val top = statusBarTop(insets)
-                val current = params
-                if (top > 0 && current != null && current.y != top) {
-                    current.y = top
-                    try {
-                        manager.updateViewLayout(strip, current)
-                    } catch (_: IllegalArgumentException) {
-                        // Removed between the inset and the update.
-                    }
-                }
+                schedulePlace()
                 insets
+            }
+            strip.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                awaitingLayout = false
+                schedulePlace()
             }
             manager.addView(strip, layout)
             windowContext = context
@@ -175,6 +209,10 @@ internal class StripOverlay(private val app: Context) {
             view = strip
             params = layout
             displayId = display.displayId
+            rotation = display.rotation
+            alignAttempts = 0
+            awaitingLayout = false
+            schedulePlace()
             true
         } catch (error: RuntimeException) {
             if (BuildConfig.DEBUG) {
@@ -185,19 +223,146 @@ internal class StripOverlay(private val app: Context) {
         }
     }
 
-    private fun updateOffset() {
-        val manager = windowManager ?: return
+    private fun schedulePlace() {
+        val strip = view ?: return
+        val generation = ++placeGeneration
+        strip.post {
+            if (generation != placeGeneration || view !== strip) return@post
+            place()
+        }
+    }
+
+    /**
+     * Keeps the strip as wide as the display that is actually on, and its left
+     * edge on the left of that display. A fullscreen player can report a parent
+     * frame that is only a few pixels wide; matching that frame is what left
+     * the line sitting on the side.
+     */
+    private fun place() {
+        if (awaitingLayout) return
         val strip = view ?: return
         val layout = params ?: return
-        val top = statusBarInset(manager)
-        if (layout.y != top) {
-            layout.y = top
-            try {
-                manager.updateViewLayout(strip, layout)
-            } catch (_: IllegalArgumentException) {
-                remove()
+        val manager = windowManager ?: return
+        val display = activeDisplay() ?: return
+        if (display.displayId != displayId || display.rotation != rotation) {
+            relayout()
+            return
+        }
+        val context = windowContext ?: strip.context
+        val span = displaySpan(display, manager)
+        val height = stripHeight(strip.resources.displayMetrics.density, appearance.textSizeSp)
+        val wantY = statusBarInset(manager, context, span)
+        strip.expectedWidth = span.width
+        val laidOut = strip.isLaidOut && strip.width > 0
+        if (!laidOut) {
+            val changed = assignFrame(layout, span.width, height, layout.x, wantY)
+            if (changed) updateFrame(manager, strip, layout)
+            return
+        }
+        val loc = IntArray(2)
+        strip.getLocationOnScreen(loc)
+        val slack = (8 * strip.resources.displayMetrics.density).toInt().coerceAtLeast(1)
+        val widthOk = strip.width + slack >= span.width
+        // A full-width line may sit a few pixels in from a cutout. Only treat
+        // that as the fullscreen slide when it is a real fraction of the screen.
+        val xOk = if (widthOk) {
+            kotlin.math.abs(loc[0]) <= span.width / 10
+        } else {
+            kotlin.math.abs(loc[0]) <= slack
+        }
+        // Leave a normal top position alone. Only pull the line back up when
+        // fullscreen has pushed it down the screen.
+        val yOk = loc[1] <= span.height / 3
+        if (widthOk && xOk && yOk) {
+            alignAttempts = 0
+            strip.holdForWidth = false
+            return
+        }
+        val short = span.width > 0 && strip.width * 2 < span.width
+        if (alignAttempts >= 2) {
+            strip.holdForWidth = false
+            return
+        }
+        val nextX = layout.x - loc[0]
+        val nextY = if (yOk) layout.y else layout.y + (wantY - loc[1])
+        val changed = assignFrame(layout, span.width, height, nextX, nextY)
+        if (!changed) {
+            alignAttempts = 2
+            strip.holdForWidth = false
+            DecisionLog.note(
+                app,
+                "overlay stayed short span=${span.width} measured=${strip.width} " +
+                    "at=${loc[0]},${loc[1]} rotation=${display.rotation}"
+            )
+            return
+        }
+        alignAttempts++
+        if (short) strip.holdForWidth = true
+        DecisionLog.note(
+            app,
+            "overlay realign span=${span.width} measured=${strip.width} " +
+                "at=${loc[0]},${loc[1]} rotation=${display.rotation}"
+        )
+        updateFrame(manager, strip, layout)
+    }
+
+    private fun assignFrame(
+        layout: WindowManager.LayoutParams,
+        width: Int,
+        height: Int,
+        x: Int,
+        y: Int
+    ): Boolean {
+        var changed = false
+        if (layout.width != width) {
+            layout.width = width
+            changed = true
+        }
+        if (layout.height != height) {
+            layout.height = height
+            changed = true
+        }
+        if (layout.x != x) {
+            layout.x = x
+            changed = true
+        }
+        if (layout.y != y) {
+            layout.y = y
+            changed = true
+        }
+        layout.gravity = Gravity.TOP or Gravity.LEFT
+        if (Build.VERSION.SDK_INT >= 30) {
+            val types = WindowInsets.Type.systemBars()
+            val sides = WindowInsets.Side.TOP or WindowInsets.Side.BOTTOM
+            if (layout.getFitInsetsTypes() != types || layout.getFitInsetsSides() != sides) {
+                layout.setFitInsetsTypes(types)
+                layout.setFitInsetsSides(sides)
+                layout.setFitInsetsIgnoringVisibility(false)
+                changed = true
             }
         }
+        return changed
+    }
+
+    private fun updateFrame(
+        manager: WindowManager,
+        strip: StripView,
+        layout: WindowManager.LayoutParams
+    ) {
+        awaitingLayout = true
+        try {
+            manager.updateViewLayout(strip, layout)
+        } catch (_: IllegalArgumentException) {
+            awaitingLayout = false
+            remove()
+            return
+        }
+        strip.postDelayed({
+            if (awaitingLayout && view === strip) {
+                awaitingLayout = false
+                schedulePlace()
+            }
+        }, 32)
     }
 
     private fun activeDisplay(): Display? {
@@ -226,30 +391,52 @@ internal class StripOverlay(private val app: Context) {
         }
     }
 
-    private fun statusBarInset(manager: WindowManager): Int {
+    private data class Span(val width: Int, val height: Int)
+
+    private fun displaySpan(display: Display, manager: WindowManager): Span {
+        val mode = display.mode
+        val swap = display.rotation == Surface.ROTATION_90 ||
+            display.rotation == Surface.ROTATION_270
+        var width = if (swap) mode.physicalHeight else mode.physicalWidth
+        var height = if (swap) mode.physicalWidth else mode.physicalHeight
+        val real = Point()
+        @Suppress("DEPRECATION")
+        display.getRealSize(real)
+        val shortest = minOf(mode.physicalWidth, mode.physicalHeight).coerceAtLeast(1)
+        // A collapsed inset frame is much smaller than the panel. Ignore it and
+        // keep the rotated hardware size so fullscreen video cannot shrink the line.
+        if (real.x >= shortest / 2 && real.y >= shortest / 2) {
+            width = real.x
+            height = real.y
+        }
+        if (Build.VERSION.SDK_INT >= 30 && (width <= 0 || height <= 0)) {
+            val bounds = manager.maximumWindowMetrics.bounds
+            width = bounds.width()
+            height = bounds.height()
+        }
+        return Span(width.coerceAtLeast(1), height.coerceAtLeast(1))
+    }
+
+    private fun statusBarInset(manager: WindowManager, context: Context, span: Span): Int {
+        val limit = (minOf(span.width, span.height) / 3).coerceAtLeast(1)
+        var top = 0
         if (Build.VERSION.SDK_INT >= 30) {
-            val top = manager.currentWindowMetrics.windowInsets
+            top = manager.currentWindowMetrics.windowInsets
                 .getInsetsIgnoringVisibility(WindowInsets.Type.statusBars())
                 .top
-            if (top > 0) return top
         }
-        val resId = app.resources.getIdentifier("status_bar_height", "dimen", "android")
-        return if (resId > 0) app.resources.getDimensionPixelSize(resId) else 0
+        if (top <= 0 || top > limit) {
+            val resId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
+            val fallback = if (resId > 0) context.resources.getDimensionPixelSize(resId) else 0
+            top = if (fallback in 1..limit) fallback else 0
+        }
+        return top
     }
 
     private fun stripHeight(density: Float, textSp: Int): Int {
         val base = (32 * density).toInt()
         val needed = (textSp * density + 12 * density).toInt()
         return maxOf(base, needed).coerceAtLeast(1)
-    }
-
-    private fun statusBarTop(insets: WindowInsets): Int {
-        return if (Build.VERSION.SDK_INT >= 30) {
-            insets.getInsets(WindowInsets.Type.statusBars()).top
-        } else {
-            @Suppress("DEPRECATION")
-            insets.systemWindowInsetTop
-        }
     }
 
     private companion object {
@@ -274,8 +461,11 @@ internal class StripView(context: Context) : View(context) {
     private var posted = false
     var finishCallback: (() -> Unit)? = null
         private set
+    var expectedWidth: Int = 0
+    var holdForWidth: Boolean = false
 
     val currentText: String get() = line
+    val scrollOffset: Float get() = offset
 
     private val tick = Runnable { frame() }
 
@@ -307,6 +497,11 @@ internal class StripView(context: Context) : View(context) {
         lastFrame = SystemClock.uptimeMillis()
         contentDescription = text
         start()
+        invalidate()
+    }
+
+    fun restoreOffset(value: Float) {
+        offset = value.coerceAtLeast(0f)
         invalidate()
     }
 
@@ -342,7 +537,9 @@ internal class StripView(context: Context) : View(context) {
         val now = SystemClock.uptimeMillis()
         val dt = (now - lastFrame).coerceIn(0L, 50L)
         lastFrame = now
-        if (width <= 0) {
+        if (width <= 0 ||
+            (holdForWidth && expectedWidth > 0 && width * 2 < expectedWidth)
+        ) {
             invalidate()
             start()
             return
