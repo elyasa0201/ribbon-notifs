@@ -121,7 +121,7 @@ internal class TickerController(private val app: Context) {
 
     fun stripTextSizeSp(): Int = prefs.textSizeSp
 
-    fun stripScrollSpeedDp(): Int = prefs.scrollSpeedDp
+    fun stripScrollSpeedDp(): Float = prefs.scrollSpeedDp
 
     fun stripBackground(): Int = prefs.stripBackground
 
@@ -130,7 +130,7 @@ internal class TickerController(private val app: Context) {
         overlay.applyAppearance(currentAppearance())
     }
 
-    fun setStripScrollSpeedDp(value: Int) {
+    fun setStripScrollSpeedDp(value: Float) {
         prefs.scrollSpeedDp = value
         overlay.applyAppearance(currentAppearance())
     }

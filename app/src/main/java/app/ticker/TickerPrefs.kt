@@ -40,10 +40,23 @@ internal class TickerPrefs(context: Context) {
             prefs.edit().putInt(KEY_TEXT, StripSteps.nearestText(value)).apply()
         }
 
-    var scrollSpeedDp: Int
-        get() = StripSteps.nearestSpeed(prefs.getInt(KEY_SPEED, StripAppearance.DEFAULT_SPEED_DP))
+    var scrollSpeedDp: Float
+        get() {
+            val milli = if (prefs.contains(KEY_SPEED_SCALE)) {
+                prefs.getInt(KEY_SPEED_SCALE, SPEED_SCALE_DEFAULT)
+            } else {
+                StripSteps.speedScaleMilli[
+                    StripSteps.nearestSpeedIndex(
+                        prefs.getInt(KEY_SPEED, StripAppearance.DEFAULT_SPEED_DP).toFloat()
+                    )
+                ]
+            }
+            val index = StripSteps.speedScaleMilli.indexOf(milli)
+            return StripSteps.speedDp(if (index < 0) 2 else index)
+        }
         set(value) {
-            prefs.edit().putInt(KEY_SPEED, StripSteps.nearestSpeed(value)).apply()
+            val index = StripSteps.nearestSpeedIndex(value)
+            prefs.edit().putInt(KEY_SPEED_SCALE, StripSteps.speedScaleMilli[index]).apply()
         }
 
     var stripBackground: Int
@@ -59,6 +72,8 @@ internal class TickerPrefs(context: Context) {
         const val KEY_PACKAGES = "selected_packages"
         const val KEY_TEXT = "strip_text_sp"
         const val KEY_SPEED = "strip_speed_dp"
+        const val KEY_SPEED_SCALE = "strip_speed_scale"
         const val KEY_BACKGROUND = "strip_background"
+        const val SPEED_SCALE_DEFAULT = 1000
     }
 }

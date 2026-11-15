@@ -12,7 +12,13 @@ class AppearanceActivity : android.app.Activity() {
         get() = (application as TickerApp).controller
 
     private val sizeIds = intArrayOf(R.id.size_xs, R.id.size_s, R.id.size_m, R.id.size_l, R.id.size_xl)
-    private val speedIds = intArrayOf(R.id.speed_xs, R.id.speed_s, R.id.speed_m, R.id.speed_l, R.id.speed_xl)
+    private val speedIds = intArrayOf(
+        R.id.speed_025,
+        R.id.speed_05,
+        R.id.speed_1,
+        R.id.speed_15,
+        R.id.speed_2
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,12 +42,12 @@ class AppearanceActivity : android.app.Activity() {
         }
         speedIds.forEachIndexed { index, id ->
             findViewById<TextView>(id).setOnClickListener {
-                controller.setStripScrollSpeedDp(StripSteps.speedDp[index])
-                paintSteps(speedIds, StripSteps.speedDp, controller.stripScrollSpeedDp())
+                controller.setStripScrollSpeedDp(StripSteps.speedDp(index))
+                paintSpeed()
             }
         }
         paintSteps(sizeIds, StripSteps.textSp, controller.stripTextSizeSp())
-        paintSteps(speedIds, StripSteps.speedDp, controller.stripScrollSpeedDp())
+        paintSpeed()
 
         val wheel = findViewById<ColorWheelView>(R.id.color_wheel)
         val none = findViewById<TextView>(R.id.bg_none)
@@ -69,6 +75,16 @@ class AppearanceActivity : android.app.Activity() {
         ids.forEachIndexed { item, id ->
             val view = findViewById<TextView>(id)
             val on = item == index
+            view.setBackgroundResource(if (on) R.drawable.bg_tab_selected else 0)
+            view.setTextColor(getColor(if (on) R.color.ink else R.color.muted))
+        }
+    }
+
+    private fun paintSpeed() {
+        val selected = StripSteps.nearestSpeedIndex(controller.stripScrollSpeedDp())
+        speedIds.forEachIndexed { item, id ->
+            val view = findViewById<TextView>(id)
+            val on = item == selected
             view.setBackgroundResource(if (on) R.drawable.bg_tab_selected else 0)
             view.setTextColor(getColor(if (on) R.color.ink else R.color.muted))
         }

@@ -40,6 +40,11 @@
     <string name="step_m">m</string>
     <string name="step_l">l</string>
     <string name="step_xl">xl</string>
+    <string name="speed_025">0.25x</string>
+    <string name="speed_05">0.5x</string>
+    <string name="speed_1">1x</string>
+    <string name="speed_15">1.5x</string>
+    <string name="speed_2">2x</string>
     <string name="bg_none">No background</string>
     <string name="background_label">Background</string>
     <string name="bg_ribbon">Ribbon</string>

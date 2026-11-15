@@ -22,7 +22,7 @@ import android.view.WindowManager
  */
 internal data class StripAppearance(
     val textSizeSp: Int = DEFAULT_TEXT_SP,
-    val scrollSpeedDp: Int = DEFAULT_SPEED_DP,
+    val scrollSpeedDp: Float = DEFAULT_SPEED_DP.toFloat(),
     val background: Int = DEFAULT_BACKGROUND
 ) {
     companion object {
@@ -35,11 +35,19 @@ internal data class StripAppearance(
 
 internal object StripSteps {
     val textSp = intArrayOf(11, 12, 14, 18, 22)
-    val speedDp = intArrayOf(35, 50, 70, 110, 160)
+    val speedScaleMilli = intArrayOf(250, 500, 1000, 1500, 2000)
 
     fun nearestText(value: Int): Int = textSp.minBy { kotlin.math.abs(it - value) }
 
-    fun nearestSpeed(value: Int): Int = speedDp.minBy { kotlin.math.abs(it - value) }
+    fun speedDp(index: Int): Float {
+        return StripAppearance.DEFAULT_SPEED_DP * speedScaleMilli[index] / 1000f
+    }
+
+    fun nearestSpeedIndex(dp: Float): Int {
+        return speedScaleMilli.indices.minBy { kotlin.math.abs(speedDp(it) - dp) }
+    }
+
+    fun nearestSpeed(dp: Float): Float = speedDp(nearestSpeedIndex(dp))
 }
 
 internal class StripOverlay(private val app: Context) {
@@ -279,7 +287,7 @@ internal class StripView(context: Context) : View(context) {
     }
 
     fun applyAppearance(appearance: StripAppearance) {
-        speedDp = appearance.scrollSpeedDp.toFloat()
+        speedDp = appearance.scrollSpeedDp
         paint.textSize = android.util.TypedValue.applyDimension(
             android.util.TypedValue.COMPLEX_UNIT_SP,
             appearance.textSizeSp.toFloat(),
