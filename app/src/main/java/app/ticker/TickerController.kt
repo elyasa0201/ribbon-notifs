@@ -58,6 +58,7 @@ internal class TickerController(private val app: Context) {
     private var ruleActive = false
     private var rulePending = false
     private var suppressRearm = false
+    private var ownOffEchoes = 0
     private var updatesDisabled = false
     private var currentForeground: String? = null
     private var showing: Line? = null
@@ -356,6 +357,7 @@ internal class TickerController(private val app: Context) {
     }
 
     private fun onZenStatus(status: Int) {
+        var deactivatedWhy = ""
         when (status) {
             NotificationManager.AUTOMATIC_RULE_STATUS_REMOVED -> {
                 prefs.ruleId = null
@@ -367,11 +369,20 @@ internal class TickerController(private val app: Context) {
                 if (Grants.policy(app)) ensureRule()
             }
             NotificationManager.AUTOMATIC_RULE_STATUS_DEACTIVATED -> {
-                // The user snoozed the mode. Further STATE_TRUE calls are ignored
-                // until this app sends STATE_FALSE, which happens on leaving.
                 ruleActive = false
                 rulePending = false
-                suppressRearm = true
+                // STATE_FALSE also reports the rule inactive. That echo is not a
+                // snooze. A snooze is the user turning it off while a selected
+                // app is still in front.
+                if (ownOffEchoes > 0) {
+                    ownOffEchoes--
+                    deactivatedWhy = " ignored reason=own-off"
+                } else if (armed && ruleDesired) {
+                    suppressRearm = true
+                    deactivatedWhy = " reason=user-snooze"
+                } else {
+                    deactivatedWhy = " ignored reason=not-in-app"
+                }
             }
             NotificationManager.AUTOMATIC_RULE_STATUS_DISABLED -> {
                 ruleActive = false
@@ -385,7 +396,7 @@ internal class TickerController(private val app: Context) {
                 rulePending = false
             }
         }
-        note("zen ${zenStatusName(status)} ${contextLine()}")
+        note("zen ${zenStatusName(status)}$deactivatedWhy ${contextLine()}")
     }
 
     private fun startPolling() {
@@ -756,14 +767,17 @@ internal class TickerController(private val app: Context) {
         val summary = if (active) "A selected app is open" else "Off"
         // SOURCE_USER_ACTION would override a snooze. The default source lets
         // the user's snooze win until we later send STATE_FALSE.
+        if (!active) ownOffEchoes++
         val condition = Condition(conditionId(), summary, state)
         try {
             manager.setAutomaticZenRuleState(id, condition)
         } catch (error: SecurityException) {
+            if (!active) ownOffEchoes = (ownOffEchoes - 1).coerceAtLeast(0)
             ruleActive = false
             note("rule denied ${contextLine()} reason=$reason ${failureText(error)}")
             return
         } catch (error: IllegalArgumentException) {
+            if (!active) ownOffEchoes = (ownOffEchoes - 1).coerceAtLeast(0)
             prefs.ruleId = null
             ruleActive = false
             ruleError = true
