@@ -1,6 +1,7 @@
 package app.ticker
 
 import android.content.Context
+import android.graphics.Color
 
 internal class TickerPrefs(context: Context) {
     private val prefs = context.getSharedPreferences(NAME, Context.MODE_PRIVATE)
@@ -65,11 +66,58 @@ internal class TickerPrefs(context: Context) {
             prefs.edit().putInt(KEY_SPEED_SCALE, StripSteps.speedScaleMilli[index]).apply()
         }
 
-    var stripBackground: Int
-        get() = prefs.getInt(KEY_BACKGROUND, StripAppearance.DEFAULT_BACKGROUND)
+    var textColor: Int
+        get() = prefs.getInt(KEY_TEXT_COLOR, StripAppearance.DEFAULT_TEXT_COLOR)
         set(value) {
-            prefs.edit().putInt(KEY_BACKGROUND, value).apply()
+            prefs.edit().putInt(KEY_TEXT_COLOR, value or OPAQUE).apply()
         }
+
+    var backgroundRgb: Int
+        get() {
+            if (prefs.contains(KEY_BG_RGB)) {
+                return prefs.getInt(KEY_BG_RGB, StripAppearance.DEFAULT_BG_RGB) or OPAQUE
+            }
+            return rgbOf(legacyBackground())
+        }
+        set(value) {
+            prefs.edit().putInt(KEY_BG_RGB, value or OPAQUE).apply()
+        }
+
+    var backgroundAlpha: Int
+        get() {
+            if (prefs.contains(KEY_BG_ALPHA)) {
+                return prefs.getInt(KEY_BG_ALPHA, StripAppearance.DEFAULT_BG_ALPHA).coerceIn(0, 255)
+            }
+            val legacy = legacyBackground()
+            return if (Color.alpha(legacy) == 0) StripAppearance.DEFAULT_BG_ALPHA else Color.alpha(legacy)
+        }
+        set(value) {
+            prefs.edit().putInt(KEY_BG_ALPHA, value.coerceIn(0, 255)).apply()
+        }
+
+    var backgroundNone: Boolean
+        get() {
+            if (prefs.contains(KEY_BG_NONE)) return prefs.getBoolean(KEY_BG_NONE, false)
+            return prefs.contains(KEY_BACKGROUND) && Color.alpha(legacyBackground()) == 0
+        }
+        set(value) {
+            prefs.edit().putBoolean(KEY_BG_NONE, value).apply()
+        }
+
+    fun composedBackground(): Int {
+        if (backgroundNone) return StripAppearance.NO_BACKGROUND
+        val rgb = backgroundRgb
+        return Color.argb(backgroundAlpha, Color.red(rgb), Color.green(rgb), Color.blue(rgb))
+    }
+
+    private fun legacyBackground(): Int {
+        return prefs.getInt(KEY_BACKGROUND, StripAppearance.DEFAULT_BACKGROUND)
+    }
+
+    private fun rgbOf(color: Int): Int {
+        if (Color.alpha(color) == 0) return StripAppearance.DEFAULT_BG_RGB
+        return Color.rgb(Color.red(color), Color.green(color), Color.blue(color))
+    }
 
     private companion object {
         const val NAME = "ticker"
@@ -81,6 +129,11 @@ internal class TickerPrefs(context: Context) {
         const val KEY_SPEED = "strip_speed_dp"
         const val KEY_SPEED_SCALE = "strip_speed_scale"
         const val KEY_BACKGROUND = "strip_background"
+        const val KEY_TEXT_COLOR = "strip_text_color"
+        const val KEY_BG_RGB = "strip_bg_rgb"
+        const val KEY_BG_ALPHA = "strip_bg_alpha"
+        const val KEY_BG_NONE = "strip_bg_none"
+        const val OPAQUE = 0xFF000000.toInt()
         const val SPEED_SCALE_DEFAULT = 1000
     }
 }

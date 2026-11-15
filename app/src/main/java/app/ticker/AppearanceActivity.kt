@@ -4,8 +4,10 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.view.View
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import kotlin.math.roundToInt
 
 class AppearanceActivity : android.app.Activity() {
     private val controller: TickerController
@@ -19,6 +21,7 @@ class AppearanceActivity : android.app.Activity() {
         R.id.speed_15,
         R.id.speed_2
     )
+    private var rendering = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,25 +52,54 @@ class AppearanceActivity : android.app.Activity() {
         paintSteps(sizeIds, StripSteps.textSp, controller.stripTextSizeSp())
         paintSpeed()
 
-        val wheel = findViewById<ColorWheelView>(R.id.color_wheel)
+        val textHue = findViewById<HueBarView>(R.id.text_hue)
+        val textWhite = findViewById<View>(R.id.text_white)
+        val bgHue = findViewById<HueBarView>(R.id.bg_hue)
+        val bgDark = findViewById<View>(R.id.bg_dark)
         val none = findViewById<TextView>(R.id.bg_none)
-        wheel.onColorChanged = { color ->
-            controller.setStripBackground(color)
-            paintNone(false)
+        val opacity = findViewById<SeekBar>(R.id.bg_opacity)
+
+        textWhite.setOnClickListener {
+            controller.setStripTextColor(Color.WHITE)
+            textHue.clearSelection()
+            paintChip(textWhite, Color.WHITE, true)
+        }
+        textHue.onColorChanged = { color ->
+            controller.setStripTextColor(color)
+            paintChip(textWhite, Color.WHITE, false)
+        }
+        bgDark.setOnClickListener {
+            controller.setStripBackgroundRgb(StripAppearance.DEFAULT_BG_RGB)
+            bgHue.clearSelection()
+            paintBackground()
+        }
+        bgHue.onColorChanged = { color ->
+            controller.setStripBackgroundRgb(color)
+            paintBackground()
         }
         none.setOnClickListener {
-            controller.setStripBackground(StripAppearance.NO_BACKGROUND)
-            wheel.clearSelection()
-            paintNone(true)
+            controller.setBackgroundNone()
+            paintBackground()
         }
-        val current = controller.stripBackground()
-        if (Color.alpha(current) == 0) {
-            wheel.clearSelection()
-            paintNone(true)
-        } else {
-            wheel.setColor(current)
-            paintNone(false)
-        }
+        opacity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                findViewById<TextView>(R.id.opacity_value).text = "$progress%"
+                if (!fromUser || rendering) return
+                controller.setStripBackgroundAlpha(alphaFromPercent(progress))
+                paintBackground()
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+
+            override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
+        })
+
+        rendering = true
+        opacity.progress = percent(controller.stripBackgroundAlpha())
+        findViewById<TextView>(R.id.opacity_value).text = "${opacity.progress}%"
+        rendering = false
+        paintTextColor()
+        paintBackground()
     }
 
     private fun paintSteps(ids: IntArray, values: IntArray, selected: Int) {
@@ -90,6 +122,36 @@ class AppearanceActivity : android.app.Activity() {
         }
     }
 
+    private fun paintTextColor() {
+        val color = controller.stripTextColor()
+        val white = isWhite(color)
+        findViewById<HueBarView>(R.id.text_hue).let { hue ->
+            if (white) hue.clearSelection() else hue.setColor(color)
+        }
+        paintChip(findViewById(R.id.text_white), Color.WHITE, white)
+    }
+
+    private fun paintBackground() {
+        val none = controller.backgroundNone()
+        val rgb = controller.stripBackgroundRgb()
+        val dark = !none && isDefaultDark(rgb)
+        val hueView = findViewById<HueBarView>(R.id.bg_hue)
+        if (none || dark) hueView.clearSelection() else hueView.setColor(rgb)
+        paintChip(findViewById(R.id.bg_dark), StripAppearance.DEFAULT_BG_RGB, dark)
+        paintNone(none)
+    }
+
+    private fun paintChip(view: View, fill: Int, selected: Boolean) {
+        val density = resources.displayMetrics.density
+        view.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(fill)
+            val stroke = if (selected) getColor(R.color.accent) else getColor(R.color.divider)
+            val width = if (selected) 2f * density else 1f * density
+            setStroke(width.toInt().coerceAtLeast(1), stroke)
+        }
+    }
+
     private fun paintNone(selected: Boolean) {
         val none = findViewById<TextView>(R.id.bg_none)
         val density = resources.displayMetrics.density
@@ -102,5 +164,17 @@ class AppearanceActivity : android.app.Activity() {
             }
         }
         none.setTextColor(getColor(if (selected) R.color.ink else R.color.muted))
+    }
+
+    private fun isWhite(color: Int): Boolean = (color and 0xFFFFFF) == 0xFFFFFF
+
+    private fun isDefaultDark(color: Int): Boolean {
+        return (color and 0xFFFFFF) == (StripAppearance.DEFAULT_BG_RGB and 0xFFFFFF)
+    }
+
+    private fun percent(alpha: Int): Int = ((alpha * 100f) / 255f).roundToInt().coerceIn(0, 100)
+
+    private fun alphaFromPercent(percent: Int): Int {
+        return ((percent.coerceIn(0, 100) * 255f) / 100f).roundToInt()
     }
 }

@@ -23,11 +23,15 @@ import android.view.WindowManager
 internal data class StripAppearance(
     val textSizeSp: Int = DEFAULT_TEXT_SP,
     val scrollSpeedDp: Float = DEFAULT_SPEED_DP.toFloat(),
-    val background: Int = DEFAULT_BACKGROUND
+    val background: Int = DEFAULT_BACKGROUND,
+    val textColor: Int = DEFAULT_TEXT_COLOR
 ) {
     companion object {
         const val DEFAULT_TEXT_SP = 14
         const val DEFAULT_SPEED_DP = 70
+        const val DEFAULT_TEXT_COLOR = Color.WHITE
+        const val DEFAULT_BG_RGB = 0xFF151515.toInt()
+        const val DEFAULT_BG_ALPHA = 0xF2
         const val DEFAULT_BACKGROUND = 0xF2151515.toInt()
         const val NO_BACKGROUND = Color.TRANSPARENT
     }
@@ -291,6 +295,7 @@ internal class StripView(context: Context) : View(context) {
             appearance.textSizeSp.toFloat(),
             resources.displayMetrics
         )
+        paint.color = appearance.textColor
         setBackgroundColor(appearance.background)
         invalidate()
     }

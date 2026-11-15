@@ -133,7 +133,13 @@ internal class TickerController(private val app: Context) {
 
     fun stripScrollSpeedDp(): Float = prefs.scrollSpeedDp
 
-    fun stripBackground(): Int = prefs.stripBackground
+    fun stripTextColor(): Int = prefs.textColor
+
+    fun stripBackgroundRgb(): Int = prefs.backgroundRgb
+
+    fun stripBackgroundAlpha(): Int = prefs.backgroundAlpha
+
+    fun backgroundNone(): Boolean = prefs.backgroundNone
 
     fun setStripTextSizeSp(value: Int) {
         prefs.textSizeSp = value
@@ -145,13 +151,35 @@ internal class TickerController(private val app: Context) {
         overlay.applyAppearance(currentAppearance())
     }
 
-    fun setStripBackground(color: Int) {
-        prefs.stripBackground = color
+    fun setStripTextColor(color: Int) {
+        prefs.textColor = color
+        overlay.applyAppearance(currentAppearance())
+    }
+
+    fun setStripBackgroundRgb(color: Int) {
+        prefs.backgroundRgb = color
+        prefs.backgroundNone = false
+        overlay.applyAppearance(currentAppearance())
+    }
+
+    fun setStripBackgroundAlpha(alpha: Int) {
+        prefs.backgroundAlpha = alpha
+        prefs.backgroundNone = false
+        overlay.applyAppearance(currentAppearance())
+    }
+
+    fun setBackgroundNone() {
+        prefs.backgroundNone = true
         overlay.applyAppearance(currentAppearance())
     }
 
     private fun currentAppearance(): StripAppearance {
-        return StripAppearance(prefs.textSizeSp, prefs.scrollSpeedDp, prefs.stripBackground)
+        return StripAppearance(
+            prefs.textSizeSp,
+            prefs.scrollSpeedDp,
+            prefs.composedBackground(),
+            prefs.textColor
+        )
     }
 
     fun noteInstalled(apps: List<LaunchableApp>) {

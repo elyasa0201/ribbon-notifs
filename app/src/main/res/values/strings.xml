@@ -48,6 +48,10 @@
     <string name="speed_2">2x</string>
     <string name="bg_none">No background</string>
     <string name="background_label">Background</string>
+    <string name="text_color_label">Text color</string>
+    <string name="text_color_white">White</string>
+    <string name="bg_default">Default background</string>
+    <string name="opacity_label">Opacity</string>
     <string name="bg_ribbon">Ribbon</string>
     <string name="bg_black">Black</string>
     <string name="bg_charcoal">Charcoal</string>
