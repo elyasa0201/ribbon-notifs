@@ -54,7 +54,7 @@
     <string name="permissions_title">Permissions</string>
     <string name="choose_apps">Choose apps</string>
     <string name="preview_strip">Preview the strip</string>
-    <string name="preview_line">Ribbon Notifs preview. This sample is long on purpose so the strip has to scroll. Watch it travel in from the edge, cross the whole screen, and keep going until the line finishes. The size, speed, and background you picked are what you are looking at here.</string>
+    <string name="preview_line">Ribbon Notifs: This is a preview ribbon notification. Adjust the size, scrolling speed and background to preview. This is what it looks like across the screen.</string>
     <string name="rule_off_info">If silence stays on after leaving a chosen app, this turns the quiet rule off.</string>
     <string name="rule_off_info_action">Explain the quiet rule</string>
     <string name="about_title">About</string>

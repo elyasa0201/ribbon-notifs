@@ -11,7 +11,7 @@ internal object TickerText {
             heading.isNotEmpty() -> heading
             else -> message
         }
-        return if (rest.isEmpty()) app else "$app — $rest"
+        return if (rest.isEmpty()) app else "$app: $rest"
     }
 
     private fun clean(value: String?): String {
