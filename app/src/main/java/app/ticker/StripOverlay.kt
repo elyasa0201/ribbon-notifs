@@ -266,8 +266,6 @@ internal class StripView(context: Context) : View(context) {
     private var speedDp = StripAppearance.DEFAULT_SPEED_DP.toFloat()
     private var line = ""
     private var offset = 0f
-    private var phase = PHASE_HOLD
-    private var phaseStart = 0L
     private var lastFrame = 0L
     private var posted = false
     var finishCallback: (() -> Unit)? = null
@@ -301,9 +299,7 @@ internal class StripView(context: Context) : View(context) {
         line = text
         finishCallback = onFinished
         offset = 0f
-        phase = PHASE_HOLD
-        phaseStart = SystemClock.uptimeMillis()
-        lastFrame = phaseStart
+        lastFrame = SystemClock.uptimeMillis()
         contentDescription = text
         start()
         invalidate()
@@ -314,8 +310,8 @@ internal class StripView(context: Context) : View(context) {
         if (line.isEmpty()) return
         val y = height / 2f - (paint.ascent() + paint.descent()) / 2f
         canvas.save()
-        canvas.clipRect(paddingLeft, 0, width - paddingRight, height)
-        canvas.drawText(line, paddingLeft - offset, y, paint)
+        canvas.clipRect(0f, 0f, width.toFloat(), height.toFloat())
+        canvas.drawText(line, width - offset, y, paint)
         canvas.restore()
     }
 
@@ -341,41 +337,22 @@ internal class StripView(context: Context) : View(context) {
         val now = SystemClock.uptimeMillis()
         val dt = (now - lastFrame).coerceIn(0L, 50L)
         lastFrame = now
-        val usable = (width - paddingLeft - paddingRight).coerceAtLeast(0).toFloat()
-        val overflow = (paint.measureText(line) - usable).coerceAtLeast(0f)
-        when (phase) {
-            PHASE_HOLD -> {
-                if (now - phaseStart >= 800L) {
-                    phase = if (overflow > 0f) PHASE_SCROLL else PHASE_END
-                    phaseStart = now
-                }
-            }
-            PHASE_SCROLL -> {
-                val speed = speedDp * resources.displayMetrics.density
-                offset = (offset + speed * dt / 1000f).coerceAtMost(overflow)
-                if (offset >= overflow - 0.5f) {
-                    offset = overflow
-                    phase = PHASE_END
-                    phaseStart = now
-                }
-            }
-            PHASE_END -> {
-                if (now - phaseStart >= 1200L) {
-                    val done = finishCallback
-                    finishCallback = null
-                    stop()
-                    done?.invoke()
-                    return
-                }
-            }
+        if (width <= 0) {
+            invalidate()
+            start()
+            return
+        }
+        val travel = width + paint.measureText(line)
+        val speed = speedDp * resources.displayMetrics.density
+        offset = (offset + speed * dt / 1000f).coerceAtMost(travel)
+        if (offset >= travel - 0.5f) {
+            val done = finishCallback
+            finishCallback = null
+            stop()
+            done?.invoke()
+            return
         }
         invalidate()
         start()
-    }
-
-    private companion object {
-        const val PHASE_HOLD = 0
-        const val PHASE_SCROLL = 1
-        const val PHASE_END = 2
     }
 }

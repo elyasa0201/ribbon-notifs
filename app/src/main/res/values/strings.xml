@@ -56,22 +56,22 @@
     <string name="choose_apps">Choose apps</string>
     <string name="preview_strip">Preview the strip</string>
     <string name="preview_line">Ribbon Notifs: This is a preview ribbon notification. Adjust the size, scrolling speed and background to preview. This is what it looks like across the screen.</string>
-    <string name="rule_off_info">If silence stays on after leaving a chosen app, this turns the quiet rule off.</string>
-    <string name="rule_off_info_action">Explain the quiet rule</string>
+    <string name="rule_off_info">If silence stays on after leaving a chosen app, this turns DND off.</string>
+    <string name="rule_off_info_action">Explain DND</string>
     <string name="about_title">About</string>
     <string name="about_summary">While a chosen app is in front, ordinary alerts go silent and scroll by as a ribbon.</string>
-    <string name="turn_rule_off">Turn the quiet rule off now</string>
+    <string name="turn_rule_off">Turn DND off now</string>
     <string name="debug_title">Notification debug</string>
     <string name="debug_summary">Records why each alert was shown or skipped. Message text is not included.</string>
     <string name="debug_share">Share log</string>
     <string name="debug_share_subject">Ribbon Notifs notification log</string>
     <string name="debug_empty">No notifications recorded yet.</string>
 
-    <string name="rule_saved">Quiet rule id: saved</string>
-    <string name="rule_not_saved">Quiet rule id: not saved</string>
-    <string name="rule_active">Quiet rule: active</string>
-    <string name="rule_inactive">Quiet rule: inactive</string>
-    <string name="rule_create_failed">The system did not save the quiet rule.</string>
+    <string name="rule_saved">DND id: saved</string>
+    <string name="rule_not_saved">DND id: not saved</string>
+    <string name="rule_active">DND: active</string>
+    <string name="rule_inactive">DND: inactive</string>
+    <string name="rule_create_failed">The system did not save DND.</string>
 
     <string name="search_apps">Search apps</string>
     <string name="no_search_results">No apps match that search.</string>
