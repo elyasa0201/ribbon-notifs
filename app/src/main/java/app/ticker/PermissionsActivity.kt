@@ -5,20 +5,16 @@ import android.os.Bundle
 import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.Switch
 import android.widget.TextView
 
 class PermissionsActivity : android.app.Activity() {
     private val controller: TickerController
         get() = (application as TickerApp).controller
 
-    private lateinit var master: Switch
-    private lateinit var blocked: TextView
     private lateinit var warning: TextView
     private lateinit var status: TextView
     private lateinit var debugLog: TextView
     private val states = ArrayList<TextView>()
-    private var rendering = false
 
     private val listener = TickerController.Listener { render() }
 
@@ -29,16 +25,9 @@ class PermissionsActivity : android.app.Activity() {
         installSystemBarPadding(root)
         capContentWidth(root)
         bindTabs(AppTab.PERMISSIONS)
-        master = findViewById(R.id.master_switch)
-        blocked = findViewById(R.id.master_blocked)
         warning = findViewById(R.id.policy_warning)
         status = findViewById(R.id.rule_status)
         debugLog = findViewById(R.id.debug_log)
-        master.setOnCheckedChangeListener { _, checked ->
-            if (rendering) return@setOnCheckedChangeListener
-            controller.setMasterEnabled(checked)
-            render()
-        }
         findViewById<View>(R.id.turn_rule_off).setOnClickListener {
             controller.turnRuleOffNow()
             render()
@@ -98,12 +87,6 @@ class PermissionsActivity : android.app.Activity() {
             states[index].setText(if (ok) R.string.state_granted else R.string.state_missing)
             states[index].setTextColor(getColor(if (ok) R.color.accent else R.color.missing))
         }
-        val core = Grants.core(this)
-        rendering = true
-        master.isEnabled = core
-        master.isChecked = controller.masterEnabled && core
-        rendering = false
-        blocked.visibility = if (core) View.GONE else View.VISIBLE
         warning.visibility = if (Grants.policy(this)) View.GONE else View.VISIBLE
         val saved = if (controller.ruleSaved) getString(R.string.rule_saved) else getString(R.string.rule_not_saved)
         val active = if (controller.isRuleActive) getString(R.string.rule_active) else getString(R.string.rule_inactive)

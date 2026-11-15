@@ -14,10 +14,15 @@ class AppsActivity : android.app.Activity() {
         get() = (application as TickerApp).controller
 
     private lateinit var empty: TextView
+    private lateinit var master: Switch
+    private lateinit var blocked: TextView
     private lateinit var adapter: AppAdapter
     private var all = emptyList<LaunchableApp>()
     private var loaded = false
     private var failed = false
+    private var rendering = false
+
+    private val listener = TickerController.Listener { renderMaster() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,6 +33,13 @@ class AppsActivity : android.app.Activity() {
         bindTabs(AppTab.APPS)
         val list = findViewById<ListView>(R.id.app_list)
         empty = findViewById(R.id.empty)
+        master = findViewById(R.id.master_switch)
+        blocked = findViewById(R.id.master_blocked)
+        master.setOnCheckedChangeListener { _, checked ->
+            if (rendering) return@setOnCheckedChangeListener
+            controller.setMasterEnabled(checked)
+            renderMaster()
+        }
         adapter = AppAdapter()
         list.adapter = adapter
         list.emptyView = empty
@@ -52,10 +64,30 @@ class AppsActivity : android.app.Activity() {
         }.start()
     }
 
+    override fun onStart() {
+        super.onStart()
+        controller.addListener(listener)
+    }
+
     override fun onResume() {
         super.onResume()
         controller.onSetupVisible()
+        renderMaster()
         if (loaded && !failed) showApps()
+    }
+
+    override fun onStop() {
+        controller.removeListener(listener)
+        super.onStop()
+    }
+
+    private fun renderMaster() {
+        val core = Grants.core(this)
+        rendering = true
+        master.isEnabled = core
+        master.isChecked = controller.masterEnabled && core
+        rendering = false
+        blocked.visibility = if (core) View.GONE else View.VISIBLE
     }
 
     private fun showApps() {
