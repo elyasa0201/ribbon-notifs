@@ -69,7 +69,8 @@ internal class TickerController(private val app: Context) {
     private var pollThread: HandlerThread? = null
     private var pollHandler: Handler? = null
     private var lastPostedKey: String? = null
-    private var lastPostedWhen = Long.MIN_VALUE
+    private var lastPostedSignature: String? = null
+    private val shownUpdateKeys = ArrayDeque<String>()
     private val postedLock = Any()
 
     internal var ruleDesired: Boolean = false
@@ -225,16 +226,23 @@ internal class TickerController(private val app: Context) {
     }
 
     fun onNotificationPosted(sbn: StatusBarNotification, rankingMap: RankingMap?) {
-        val stamp = sbn.postTime
-        synchronized(postedLock) {
-            if (sbn.key == lastPostedKey && stamp == lastPostedWhen) return
-            lastPostedKey = sbn.key
-            lastPostedWhen = stamp
-        }
-
         val pkg = sbn.packageName
         fun skip(reason: String) {
             note("skip pkg=$pkg ${contextLine()} reason=$reason")
+        }
+
+        val notification = sbn.notification
+        if (notification == null) {
+            skip("empty")
+            return
+        }
+        // Same chat updates the same status-bar key and often the same post
+        // time. Only an identical repost is a duplicate callback. A new
+        // message in that conversation still gets its own line.
+        val signature = contentSignature(sbn)
+        val update = synchronized(postedLock) {
+            if (sbn.key == lastPostedKey && signature == lastPostedSignature) return
+            shownUpdateKeys.contains(sbn.key)
         }
 
         if (!armed) {
@@ -247,11 +255,6 @@ internal class TickerController(private val app: Context) {
         }
         if (pkg == currentForeground) {
             skip("foreground-app")
-            return
-        }
-        val notification = sbn.notification
-        if (notification == null) {
-            skip("empty")
             return
         }
         val flags = notification.flags
@@ -277,26 +280,36 @@ internal class TickerController(private val app: Context) {
         } catch (_: RuntimeException) {
             false
         }
-        if (!ranked) {
+        if (!ranked && !update) {
             skip("no-ranking")
             return
         }
-        val channelImportance = ranking.channel?.importance
-        val peek = (ranking.suppressedVisualEffects and
+        val channelImportance = if (ranked) ranking.channel?.importance else null
+        val peek = ranked && (ranking.suppressedVisualEffects and
             NotificationManager.Policy.SUPPRESSED_EFFECT_PEEK) != 0
-        if (!ordinaryAlert(ranking.importance, channelImportance, peek)) {
+        val alerting = ranked && ordinaryAlert(ranking.importance, channelImportance, peek)
+        if (!alerting && !update) {
             val channel = channelImportance ?: -1
-            skip("below-importance rank=${ranking.importance} channel=$channel peek=$peek")
+            val rank = if (ranked) ranking.importance else -1
+            skip("below-importance rank=$rank channel=$channel peek=$peek")
             return
         }
         val extras = notification.extras
         val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
         val body = messageBody(extras)
         val channel = channelImportance ?: -1
+        val rank = if (ranked) ranking.importance else -1
+        val reason = if (update && !alerting) "update" else "shown"
         note(
-            "accept pkg=$pkg ${contextLine()} reason=shown " +
-                "rank=${ranking.importance} channel=$channel peek=$peek"
+            "accept pkg=$pkg ${contextLine()} reason=$reason " +
+                "rank=$rank channel=$channel peek=$peek"
         )
+        synchronized(postedLock) {
+            if (sbn.key == lastPostedKey && signature == lastPostedSignature) return
+            lastPostedKey = sbn.key
+            lastPostedSignature = signature
+            rememberShownKey(sbn.key)
+        }
         enqueue(Line(TickerText.line(appLabel(pkg), title, body), preview = false, packageName = pkg))
     }
 
@@ -921,26 +934,47 @@ internal class TickerController(private val app: Context) {
         }
     }
 
-    private fun messageBody(extras: android.os.Bundle?): String? {
-        if (extras == null) return null
-        val direct = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
-        if (!direct.isNullOrEmpty()) return direct
-        return lastMessageText(extras)
+    private fun contentSignature(sbn: StatusBarNotification): String {
+        val extras = sbn.notification?.extras
+        val messages = if (extras == null) emptyList() else messagingMessages(extras)
+        val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
+        val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
+        val body = messageBody(extras).orEmpty()
+        val whenMs = sbn.notification?.`when` ?: 0L
+        val lastTime = messages.lastOrNull()?.time ?: 0L
+        return "${messages.size}|$whenMs|$lastTime|$title|$text|$body"
     }
 
-    private fun lastMessageText(extras: android.os.Bundle): String? {
+    private fun rememberShownKey(key: String) {
+        if (shownUpdateKeys.contains(key)) return
+        shownUpdateKeys.addLast(key)
+        while (shownUpdateKeys.size > SHOWN_KEYS) shownUpdateKeys.removeFirst()
+    }
+
+    private fun messageBody(extras: android.os.Bundle?): String? {
+        if (extras == null) return null
+        val messages = messagingMessages(extras)
+        val newest = messages.lastOrNull()
+        if (newest != null && newest.text.isNotEmpty()) return newest.text
+        val direct = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
+        if (!direct.isNullOrEmpty()) return direct
+        return messages.lastOrNull { it.text.isNotEmpty() }?.text
+    }
+
+    private fun messagingMessages(extras: android.os.Bundle): List<ChatMessage> {
         val raw = if (Build.VERSION.SDK_INT >= 33) {
             extras.getParcelableArray(Notification.EXTRA_MESSAGES, Parcelable::class.java)
         } else {
             @Suppress("DEPRECATION")
             extras.getParcelableArray(Notification.EXTRA_MESSAGES)
-        } ?: return null
-        for (index in raw.indices.reversed()) {
-            val bundle = raw[index] as? android.os.Bundle ?: continue
-            val text = bundle.getCharSequence("text")?.toString()?.trim()
-            if (!text.isNullOrEmpty()) return text
+        } ?: return emptyList()
+        val messages = ArrayList<ChatMessage>(raw.size)
+        for (item in raw) {
+            val bundle = item as? android.os.Bundle ?: continue
+            val text = bundle.getCharSequence("text")?.toString()?.trim().orEmpty()
+            messages.add(ChatMessage(text, bundle.getLong("time")))
         }
-        return null
+        return messages
     }
 
     private fun isMediaStyle(notification: Notification): Boolean {
@@ -1007,6 +1041,8 @@ internal class TickerController(private val app: Context) {
 
     private data class OpenActivity(val packageName: String, val time: Long)
 
+    private data class ChatMessage(val text: String, val time: Long)
+
     private sealed class ForegroundRead {
         data class Known(val packageName: String?) : ForegroundRead()
         data object Unavailable : ForegroundRead()
@@ -1015,6 +1051,7 @@ internal class TickerController(private val app: Context) {
     private companion object {
         const val TAG = "Ticker"
         const val POLL_MS = 1000L
+        const val SHOWN_KEYS = 40
         const val USAGE_LOOKBACK_MS = 7L * 24L * 60L * 60L * 1000L
     }
 }
