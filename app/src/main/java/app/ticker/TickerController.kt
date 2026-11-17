@@ -68,9 +68,8 @@ internal class TickerController(private val app: Context) {
     private var lastCreateFailure: String? = null
     private var pollThread: HandlerThread? = null
     private var pollHandler: Handler? = null
-    private var lastPostedKey: String? = null
-    private var lastPostedSignature: String? = null
     private val shownUpdateKeys = ArrayDeque<String>()
+    private val recentPosts = ArrayDeque<RibbonPost>()
     private val postedLock = Any()
 
     internal var ruleDesired: Boolean = false
@@ -236,14 +235,7 @@ internal class TickerController(private val app: Context) {
             skip("empty")
             return
         }
-        // Same chat updates the same status-bar key and often the same post
-        // time. Only an identical repost is a duplicate callback. A new
-        // message in that conversation still gets its own line.
-        val signature = contentSignature(sbn)
-        val update = synchronized(postedLock) {
-            if (sbn.key == lastPostedKey && signature == lastPostedSignature) return
-            shownUpdateKeys.contains(sbn.key)
-        }
+        val update = synchronized(postedLock) { shownUpdateKeys.contains(sbn.key) }
 
         if (!armed) {
             skip("not-armed")
@@ -297,6 +289,18 @@ internal class TickerController(private val app: Context) {
         val extras = notification.extras
         val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
         val body = messageBody(extras)
+        val line = TickerText.line(appLabel(pkg), title, body)
+        val posted = RibbonPost(
+            key = sbn.key,
+            pkg = pkg,
+            line = line,
+            count = if (extras == null) 0 else messagingMessages(extras).size,
+            postSecond = sbn.postTime / 1000L
+        )
+        if (synchronized(postedLock) { isDuplicate(posted) }) {
+            skip("duplicate")
+            return
+        }
         val channel = channelImportance ?: -1
         val rank = if (ranked) ranking.importance else -1
         val reason = if (update && !alerting) "update" else "shown"
@@ -305,12 +309,11 @@ internal class TickerController(private val app: Context) {
                 "rank=$rank channel=$channel peek=$peek"
         )
         synchronized(postedLock) {
-            if (sbn.key == lastPostedKey && signature == lastPostedSignature) return
-            lastPostedKey = sbn.key
-            lastPostedSignature = signature
+            if (isDuplicate(posted)) return
+            rememberPost(posted)
             rememberShownKey(sbn.key)
         }
-        enqueue(Line(TickerText.line(appLabel(pkg), title, body), preview = false, packageName = pkg))
+        enqueue(Line(line, preview = false, packageName = pkg))
     }
 
     private fun registerReceivers() {
@@ -934,15 +937,21 @@ internal class TickerController(private val app: Context) {
         }
     }
 
-    private fun contentSignature(sbn: StatusBarNotification): String {
-        val extras = sbn.notification?.extras
-        val messages = if (extras == null) emptyList() else messagingMessages(extras)
-        val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString().orEmpty()
-        val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString().orEmpty()
-        val body = messageBody(extras).orEmpty()
-        val whenMs = sbn.notification?.`when` ?: 0L
-        val lastTime = messages.lastOrNull()?.time ?: 0L
-        return "${messages.size}|$whenMs|$lastTime|$title|$text|$body"
+    private fun isDuplicate(posted: RibbonPost): Boolean {
+        val now = SystemClock.elapsedRealtime()
+        for (prev in recentPosts) {
+            val sameLine = prev.pkg == posted.pkg && prev.line == posted.line
+            val sameSecond = prev.postSecond == posted.postSecond ||
+                now - prev.enqueuedAt <= SAME_TEXT_WINDOW_MS
+            if (sameLine && sameSecond) return true
+            if (prev.key == posted.key && sameLine && prev.count == posted.count) return true
+        }
+        return false
+    }
+
+    private fun rememberPost(posted: RibbonPost) {
+        recentPosts.addLast(posted.copy(enqueuedAt = SystemClock.elapsedRealtime()))
+        while (recentPosts.size > SHOWN_KEYS) recentPosts.removeFirst()
     }
 
     private fun rememberShownKey(key: String) {
@@ -1043,6 +1052,15 @@ internal class TickerController(private val app: Context) {
 
     private data class ChatMessage(val text: String, val time: Long)
 
+    private data class RibbonPost(
+        val key: String,
+        val pkg: String,
+        val line: String,
+        val count: Int,
+        val postSecond: Long,
+        val enqueuedAt: Long = 0L
+    )
+
     private sealed class ForegroundRead {
         data class Known(val packageName: String?) : ForegroundRead()
         data object Unavailable : ForegroundRead()
@@ -1052,6 +1070,7 @@ internal class TickerController(private val app: Context) {
         const val TAG = "Ticker"
         const val POLL_MS = 1000L
         const val SHOWN_KEYS = 40
+        const val SAME_TEXT_WINDOW_MS = 1000L
         const val USAGE_LOOKBACK_MS = 7L * 24L * 60L * 60L * 1000L
     }
 }
