@@ -70,7 +70,13 @@ internal class TickerController(private val app: Context) {
     private var pollHandler: Handler? = null
     private val shownUpdateKeys = ArrayDeque<String>()
     private val recentPosts = ArrayDeque<RibbonPost>()
+    private val baselineText = HashMap<String, NoticeText>()
+    private val acceptedSinceArm = HashSet<String>()
     private val postedLock = Any()
+    private var armedAtMillis = Long.MAX_VALUE
+
+    /** Active shade, read from the connected listener. Used once each time we arm. */
+    internal var activeNotifications: (() -> List<StatusBarNotification>)? = null
 
     internal var ruleDesired: Boolean = false
         private set
@@ -96,6 +102,7 @@ internal class TickerController(private val app: Context) {
         if (Grants.policy(app)) ensureRule()
         setRuleState(active = false, reason = "process start", force = true)
         armed = false
+        closeArrivalGate()
         ruleActive = false
         suppressRearm = false
         refreshInstalledApps()
@@ -119,6 +126,7 @@ internal class TickerController(private val app: Context) {
         prefs.masterEnabled = enabled
         if (!enabled) {
             armed = false
+            closeArrivalGate()
             suppressRearm = false
             setRuleState(active = false, reason = "master off", force = false)
             clearStrip()
@@ -191,6 +199,7 @@ internal class TickerController(private val app: Context) {
 
     fun turnRuleOffNow() {
         armed = false
+        closeArrivalGate()
         suppressRearm = false
         setRuleState(active = false, reason = "manual off", force = true)
         dropAlertLines()
@@ -210,6 +219,7 @@ internal class TickerController(private val app: Context) {
         updatesDisabled = false
         setRuleState(active = false, reason = "listener connected", force = true)
         armed = false
+        closeArrivalGate()
         ruleActive = false
         startPolling()
         changed()
@@ -219,6 +229,7 @@ internal class TickerController(private val app: Context) {
         listenerConnected = false
         stopPolling()
         armed = false
+        closeArrivalGate()
         clearStrip()
         setRuleState(active = false, reason = "listener disconnected", force = true)
         note("listener disconnected ${contextLine()}")
@@ -235,8 +246,6 @@ internal class TickerController(private val app: Context) {
             skip("empty")
             return
         }
-        val update = synchronized(postedLock) { shownUpdateKeys.contains(sbn.key) }
-
         if (!armed) {
             skip("not-armed")
             return
@@ -266,6 +275,21 @@ internal class TickerController(private val app: Context) {
             skip("media")
             return
         }
+        val text = noticeText(notification)
+        val arrival = synchronized(postedLock) { arrivalOf(sbn.key, text, sbn.postTime) }
+        if (arrival == Arrival.Replay) {
+            skip("already-posted")
+            return
+        }
+        if (arrival == Arrival.BeforeArm) {
+            skip("posted-before-arm")
+            return
+        }
+        // A conversation update is often ranked below high. So is a new message
+        // that only changes the text of a notification already in the shade.
+        val update = synchronized(postedLock) {
+            shownUpdateKeys.contains(sbn.key) || arrival == Arrival.TextChanged
+        }
         val ranking = Ranking()
         val ranked = try {
             rankingMap?.getRanking(sbn.key, ranking) == true
@@ -286,15 +310,11 @@ internal class TickerController(private val app: Context) {
             skip("below-importance rank=$rank channel=$channel peek=$peek")
             return
         }
-        val extras = notification.extras
-        val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
-        val body = messageBody(extras)
-        val line = TickerText.line(appLabel(pkg), title, body)
+        val line = TickerText.line(appLabel(pkg), text.title, text.body)
         val posted = RibbonPost(
             key = sbn.key,
             pkg = pkg,
             line = line,
-            count = if (extras == null) 0 else messagingMessages(extras).size,
             postSecond = sbn.postTime / 1000L
         )
         if (synchronized(postedLock) { isDuplicate(posted) }) {
@@ -310,8 +330,12 @@ internal class TickerController(private val app: Context) {
         )
         synchronized(postedLock) {
             if (isDuplicate(posted)) return
+            val again = arrivalOf(sbn.key, text, sbn.postTime)
+            if (again == Arrival.Replay || again == Arrival.BeforeArm) return
             rememberPost(posted)
             rememberShownKey(sbn.key)
+            acceptedSinceArm.add(sbn.key)
+            baselineText.remove(sbn.key)
         }
         enqueue(Line(line, preview = false, packageName = pkg))
     }
@@ -512,8 +536,15 @@ internal class TickerController(private val app: Context) {
             packageName in selected
         if (shouldArm) {
             val entered = !armed
+            if (entered) {
+                // postTime is wall-clock. Anything already in the shade is older
+                // than this, including replays that arrive as zen turns on.
+                armedAtMillis = System.currentTimeMillis()
+                synchronized(postedLock) { acceptedSinceArm.clear() }
+            }
             armed = true
             currentForeground = packageName
+            val baseline = if (entered) captureBaseline() else null
             if (!ruleActive && !suppressRearm && !updatesDisabled) {
                 if (prefs.ruleId == null && Grants.policy(app)) ensureRule()
                 setRuleState(active = true, reason = "foreground", force = false)
@@ -522,9 +553,10 @@ internal class TickerController(private val app: Context) {
             } else if (entered && updatesDisabled) {
                 note("silence held ${contextLine()} reason=disabled")
             }
-            if (entered) note("armed ${contextLine()}")
+            if (entered) note("armed ${contextLine()} baseline=$baseline")
         } else if (armed || ruleActive || suppressRearm) {
             armed = false
+            closeArrivalGate()
             currentForeground = packageName
             suppressRearm = false
             setRuleState(active = false, reason = "left foreground", force = false)
@@ -937,6 +969,55 @@ internal class TickerController(private val app: Context) {
         }
     }
 
+    /**
+     * Notifications already posted when the selected app came to the front.
+     * The listener replays this set when it connects and again when zen arms.
+     * Same text is not a new alert. A changed text is.
+     */
+    private fun captureBaseline(): String {
+        val source = activeNotifications
+        if (source == null) {
+            synchronized(postedLock) { baselineText.clear() }
+            return "unavailable"
+        }
+        val active = try {
+            source()
+        } catch (_: RuntimeException) {
+            synchronized(postedLock) { baselineText.clear() }
+            return "unavailable"
+        }
+        val next = HashMap<String, NoticeText>(active.size)
+        for (sbn in active) {
+            if (sbn.packageName == app.packageName) continue
+            val notification = sbn.notification ?: continue
+            next[sbn.key] = noticeText(notification)
+        }
+        synchronized(postedLock) {
+            baselineText.clear()
+            baselineText.putAll(next)
+        }
+        return next.size.toString()
+    }
+
+    private fun closeArrivalGate() {
+        armedAtMillis = Long.MAX_VALUE
+        synchronized(postedLock) {
+            baselineText.clear()
+            acceptedSinceArm.clear()
+        }
+    }
+
+    private fun arrivalOf(key: String, text: NoticeText, postTime: Long): Arrival {
+        if (acceptedSinceArm.contains(key)) return Arrival.Fresh
+        val baseline = baselineText[key]
+        if (baseline != null) {
+            if (baseline == text) return Arrival.Replay
+            return Arrival.TextChanged
+        }
+        if (postTime < armedAtMillis) return Arrival.BeforeArm
+        return Arrival.Fresh
+    }
+
     private fun isDuplicate(posted: RibbonPost): Boolean {
         val now = SystemClock.elapsedRealtime()
         for (prev in recentPosts) {
@@ -944,7 +1025,9 @@ internal class TickerController(private val app: Context) {
             val sameSecond = prev.postSecond == posted.postSecond ||
                 now - prev.enqueuedAt <= SAME_TEXT_WINDOW_MS
             if (sameLine && sameSecond) return true
-            if (prev.key == posted.key && sameLine && prev.count == posted.count) return true
+            // One ribbon per key until the visible text changes. Same-second
+            // identical text from another key is still handled above.
+            if (prev.key == posted.key && prev.line == posted.line) return true
         }
         return false
     }
@@ -958,6 +1041,12 @@ internal class TickerController(private val app: Context) {
         if (shownUpdateKeys.contains(key)) return
         shownUpdateKeys.addLast(key)
         while (shownUpdateKeys.size > SHOWN_KEYS) shownUpdateKeys.removeFirst()
+    }
+
+    private fun noticeText(notification: Notification): NoticeText {
+        val extras = notification.extras
+        val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+        return NoticeText(title, messageBody(extras))
     }
 
     private fun messageBody(extras: android.os.Bundle?): String? {
@@ -1052,11 +1141,19 @@ internal class TickerController(private val app: Context) {
 
     private data class ChatMessage(val text: String, val time: Long)
 
+    private data class NoticeText(val title: String?, val body: String?)
+
+    private enum class Arrival {
+        Fresh,
+        Replay,
+        BeforeArm,
+        TextChanged
+    }
+
     private data class RibbonPost(
         val key: String,
         val pkg: String,
         val line: String,
-        val count: Int,
         val postSecond: Long,
         val enqueuedAt: Long = 0L
     )

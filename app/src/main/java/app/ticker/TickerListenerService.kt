@@ -10,6 +10,13 @@ class TickerListenerService : NotificationListenerService() {
         get() = (application as TickerApp).controller
 
     override fun onListenerConnected() {
+        controller.activeNotifications = {
+            try {
+                this@TickerListenerService.activeNotifications?.filterNotNull().orEmpty()
+            } catch (_: RuntimeException) {
+                emptyList()
+            }
+        }
         val migrated = requestAlertTypes()
         val filter = if (migrated) "alerting+silent+conversations" else "unchanged"
         DecisionLog.note(this, "listener connected filter=$filter")
@@ -17,6 +24,7 @@ class TickerListenerService : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
+        controller.activeNotifications = null
         controller.onListenerDisconnected()
         requestRebind(ComponentName(this, TickerListenerService::class.java))
     }
