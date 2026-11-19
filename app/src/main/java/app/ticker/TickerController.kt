@@ -25,21 +25,19 @@ import android.service.notification.Condition
 import android.service.notification.NotificationListenerService.Ranking
 import android.service.notification.NotificationListenerService.RankingMap
 import android.service.notification.StatusBarNotification
-import android.service.notification.ZenPolicy
 import android.util.Log
-import android.app.AutomaticZenRule
 import android.net.Uri
 import java.util.ArrayDeque
 
 /**
- * Arms one app-owned Do Not Disturb rule while a chosen app is in front and
- * feeds ordinary high-importance alerts to the strip. The original notification
- * is never cancelled or snoozed.
+ * While a chosen app is in front, ordinary alerts go on the strip and are then
+ * cancelled so the heads-up cannot stay up. Cancelling removes the shade entry
+ * too; that is the public dismiss call. Calls, alarms, ongoing events, and
+ * media are left in place. Do Not Disturb is never turned on.
  *
  * Failure handling lives here: a missing grant, a null usage result before the
- * first unlock after boot, listener disconnect, a rule deleted in system
- * settings, a user snooze of the mode, and a process start that finds the rule
- * still true.
+ * first unlock after boot, listener disconnect, and a process start that finds
+ * an older zen rule still true.
  */
 internal class TickerController(private val app: Context) {
     fun interface Listener {
@@ -63,7 +61,6 @@ internal class TickerController(private val app: Context) {
     private var currentForeground: String? = null
     private var showing: Line? = null
     private var ruleError = false
-    private var updateWarned = false
     private var usageWarned = false
     private var lastCreateFailure: String? = null
     private var pollThread: HandlerThread? = null
@@ -77,6 +74,9 @@ internal class TickerController(private val app: Context) {
 
     /** Active shade, read from the connected listener. Used once each time we arm. */
     internal var activeNotifications: (() -> List<StatusBarNotification>)? = null
+
+    /** Removes one posted notification. Returns false when the listener call fails. */
+    internal var dismissNotification: ((String) -> Boolean)? = null
 
     internal var ruleDesired: Boolean = false
         private set
@@ -319,6 +319,7 @@ internal class TickerController(private val app: Context) {
         )
         if (synchronized(postedLock) { isDuplicate(posted) }) {
             skip("duplicate")
+            dismissAlert(pkg, notification, sbn.key)
             return
         }
         val channel = channelImportance ?: -1
@@ -328,16 +329,58 @@ internal class TickerController(private val app: Context) {
             "accept pkg=$pkg ${contextLine()} reason=$reason " +
                 "rank=$rank channel=$channel peek=$peek"
         )
+        var took = false
         synchronized(postedLock) {
-            if (isDuplicate(posted)) return
+            if (isDuplicate(posted)) return@synchronized
             val again = arrivalOf(sbn.key, text, sbn.postTime)
-            if (again == Arrival.Replay || again == Arrival.BeforeArm) return
+            if (again == Arrival.Replay || again == Arrival.BeforeArm) return@synchronized
             rememberPost(posted)
             rememberShownKey(sbn.key)
             acceptedSinceArm.add(sbn.key)
             baselineText.remove(sbn.key)
+            took = true
         }
-        enqueue(Line(line, preview = false, packageName = pkg))
+        if (!took) return
+        showOnRibbon(Line(line, preview = false, packageName = pkg)) {
+            dismissAlert(pkg, notification, sbn.key)
+        }
+    }
+
+    private fun showOnRibbon(line: Line, afterQueued: () -> Unit) {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            main.post { showOnRibbon(line, afterQueued) }
+            return
+        }
+        queue.addLast(line)
+        if (showing == null) showNext()
+        afterQueued()
+    }
+
+    private fun dismissAlert(pkg: String, notification: Notification, key: String) {
+        if (keepsSystemAlert(notification)) return
+        val dismiss = dismissNotification
+        if (dismiss == null) {
+            note("dismiss failed pkg=$pkg ${contextLine()} reason=no-listener")
+            return
+        }
+        val removed = try {
+            dismiss(key)
+        } catch (_: RuntimeException) {
+            false
+        }
+        if (removed) {
+            note("dismiss pkg=$pkg ${contextLine()} reason=cancel")
+        } else {
+            note("dismiss failed pkg=$pkg ${contextLine()} reason=cancel")
+        }
+    }
+
+    private fun keepsSystemAlert(notification: Notification): Boolean {
+        val category = notification.category
+        if (category == Notification.CATEGORY_CALL) return true
+        if (category == Notification.CATEGORY_ALARM) return true
+        if (notification.fullScreenIntent != null) return true
+        return false
     }
 
     private fun registerReceivers() {
@@ -406,7 +449,6 @@ internal class TickerController(private val app: Context) {
                 suppressRearm = false
                 updatesDisabled = false
                 ruleError = false
-                if (Grants.policy(app)) ensureRule()
             }
             NotificationManager.AUTOMATIC_RULE_STATUS_DEACTIVATED -> {
                 ruleActive = false
@@ -434,6 +476,9 @@ internal class TickerController(private val app: Context) {
             NotificationManager.AUTOMATIC_RULE_STATUS_ACTIVATED -> {
                 ruleActive = true
                 rulePending = false
+                // An older install can still be switched on by the system. Turn it
+                // back off. This app does not activate the rule itself.
+                setRuleState(active = false, reason = "unexpected-on", force = true)
             }
         }
         note("zen ${zenStatusName(status)}$deactivatedWhy ${contextLine()}")
@@ -538,20 +583,15 @@ internal class TickerController(private val app: Context) {
             val entered = !armed
             if (entered) {
                 // postTime is wall-clock. Anything already in the shade is older
-                // than this, including replays that arrive as zen turns on.
+                // than this and is not a new alert.
                 armedAtMillis = System.currentTimeMillis()
                 synchronized(postedLock) { acceptedSinceArm.clear() }
             }
             armed = true
             currentForeground = packageName
             val baseline = if (entered) captureBaseline() else null
-            if (!ruleActive && !suppressRearm && !updatesDisabled) {
-                if (prefs.ruleId == null && Grants.policy(app)) ensureRule()
-                setRuleState(active = true, reason = "foreground", force = false)
-            } else if (entered && suppressRearm) {
-                note("silence held ${contextLine()} reason=snoozed")
-            } else if (entered && updatesDisabled) {
-                note("silence held ${contextLine()} reason=disabled")
+            if (ruleActive || ruleDesired) {
+                setRuleState(active = false, reason = "foreground", force = true)
             }
             if (entered) note("armed ${contextLine()} baseline=$baseline")
         } else if (armed || ruleActive || suppressRearm) {
@@ -567,6 +607,10 @@ internal class TickerController(private val app: Context) {
         }
     }
 
+    /**
+     * Finds a rule an older install already saved, so Turn DND off can reach it.
+     * Does not create or update a rule, and does not turn one on.
+     */
     private fun ensureRule() {
         if (!Grants.policy(app)) return
         val manager = notificationManager() ?: return
@@ -580,75 +624,15 @@ internal class TickerController(private val app: Context) {
                 return
             }
             if (existing != null) {
-                val shape = prefs.ruleShape?.let { storedShape(it) } ?: inferShape(existing)
-                val updated = try {
-                    manager.updateAutomaticZenRule(saved, buildRule(shape, ruleTypes().first()))
-                } catch (error: RuntimeException) {
-                    if (!updateWarned) {
-                        updateWarned = true
-                        note("rule update failed ${contextLine()} ${failureText(error)}")
-                    }
-                    ruleError = false
-                    return
-                }
-                if (!updated && !updateWarned) {
-                    updateWarned = true
-                    note("rule update declined ${contextLine()} userManaged=${zenRulesUserManaged()}")
-                }
                 ruleError = false
                 return
             }
             prefs.ruleId = null
         }
-        findOwnedRule(manager)?.let { adopted ->
-            prefs.ruleId = adopted
-            ruleError = false
-            noteCreate("rule adopted ${contextLine()} userManaged=${zenRulesUserManaged()}")
-            return
-        }
-        val problems = ArrayList<String>()
-        var created: String? = null
-        var used: RuleShape? = null
-        for (type in ruleTypes()) {
-            for (shape in RuleShape.entries) {
-                val label = "${shape.wire}/$type"
-                try {
-                    val id = manager.addAutomaticZenRule(buildRule(shape, type))
-                    if (!id.isNullOrEmpty()) {
-                        created = id
-                        used = shape
-                        break
-                    }
-                    problems.add("$label:returned-null")
-                } catch (error: RuntimeException) {
-                    problems.add("$label:${failureText(error)}")
-                }
-                findOwnedRule(manager)?.let { adopted ->
-                    prefs.ruleId = adopted
-                    prefs.ruleShape = shape.wire
-                    ruleError = false
-                    noteCreate(
-                        "rule adopted ${contextLine()} via=$label " +
-                            "userManaged=${zenRulesUserManaged()} ${problems.joinToString(" | ")}"
-                    )
-                    return
-                }
-            }
-            if (created != null) break
-        }
-        if (created.isNullOrEmpty()) {
-            ruleError = true
-            noteCreate(
-                "rule create failed ${contextLine()} userManaged=${zenRulesUserManaged()} " +
-                    problems.joinToString(" | ")
-            )
-        } else {
-            prefs.ruleId = created
-            prefs.ruleShape = used?.wire
-            ruleError = false
-            lastCreateFailure = null
-            note("rule created ${contextLine()} via=${used?.wire} userManaged=${zenRulesUserManaged()}")
-        }
+        val adopted = findOwnedRule(manager) ?: return
+        prefs.ruleId = adopted
+        ruleError = false
+        noteCreate("rule adopted ${contextLine()}")
     }
 
     private fun findOwnedRule(manager: NotificationManager): String? {
@@ -667,77 +651,12 @@ internal class TickerController(private val app: Context) {
         }?.key
     }
 
-    private fun ruleTypes(): IntArray {
-        return if (Build.VERSION.SDK_INT >= 35) {
-            intArrayOf(AutomaticZenRule.TYPE_OTHER, AutomaticZenRule.TYPE_IMMERSIVE)
-        } else {
-            intArrayOf(0)
-        }
-    }
-
-    private fun buildRule(shape: RuleShape, type: Int): AutomaticZenRule {
-        val name = app.getString(R.string.rule_name)
-        val condition = conditionId()
-        val policy = zenPolicy()
-        val activity = configurationActivity()
-        val provider = conditionProvider()
-        // TYPE_UNKNOWN is rejected once the app targets Android 15 or higher, and One UI
-        // still refuses a rule that has no condition-provider owner. Try a normal app
-        // rule first, then a provider-owned one.
-        if (Build.VERSION.SDK_INT >= 35) {
-            val builder = AutomaticZenRule.Builder(name, condition)
-                .setZenPolicy(policy)
-                .setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY)
-                .setEnabled(true)
-                .setType(type)
-                .setTriggerDescription(app.getString(R.string.rule_trigger))
-            if (shape != RuleShape.OWNER) builder.setConfigurationActivity(activity)
-            if (shape != RuleShape.ACTIVITY) builder.setOwner(provider)
-            return builder.build()
-        }
-        val owner = if (shape == RuleShape.ACTIVITY) null else provider
-        val config = if (shape == RuleShape.OWNER) null else activity
-        return AutomaticZenRule(
-            name,
-            owner,
-            config,
-            condition,
-            policy,
-            NotificationManager.INTERRUPTION_FILTER_PRIORITY,
-            true
-        )
-    }
-
     private fun configurationActivity(): ComponentName {
         return ComponentName(app, RuleExplanationActivity::class.java)
     }
 
     private fun conditionProvider(): ComponentName {
         return ComponentName(app, TickerConditionService::class.java)
-    }
-
-    private fun inferShape(rule: AutomaticZenRule): RuleShape {
-        val hasOwner = rule.owner != null
-        val hasActivity = rule.configurationActivity != null
-        return when {
-            hasOwner && hasActivity -> RuleShape.BOTH
-            hasOwner -> RuleShape.OWNER
-            else -> RuleShape.ACTIVITY
-        }
-    }
-
-    private fun storedShape(value: String): RuleShape {
-        return RuleShape.entries.firstOrNull { it.wire == value } ?: RuleShape.ACTIVITY
-    }
-
-    private fun zenRulesUserManaged(): String {
-        if (Build.VERSION.SDK_INT < 35) return "n/a"
-        val manager = notificationManager() ?: return "n/a"
-        return try {
-            manager.areAutomaticZenRulesUserManaged().toString()
-        } catch (error: RuntimeException) {
-            failureText(error)
-        }
     }
 
     private fun failureText(error: Throwable): String {
@@ -760,39 +679,11 @@ internal class TickerController(private val app: Context) {
         note(message)
     }
 
-    private enum class RuleShape(val wire: String) {
-        ACTIVITY("activity"),
-        OWNER("owner"),
-        BOTH("both")
-    }
-
-    private fun zenPolicy(): ZenPolicy {
-        val builder = ZenPolicy.Builder()
-            .allowMessages(ZenPolicy.PEOPLE_TYPE_NONE)
-            .allowReminders(false)
-            .allowEvents(false)
-            .allowCalls(ZenPolicy.PEOPLE_TYPE_ANYONE)
-            .allowRepeatCallers(true)
-            .allowAlarms(true)
-            .allowMedia(true)
-            .allowSystem(true)
-            .showPeeking(false)
-            .showInNotificationList(true)
-            .showStatusBarIcons(true)
-            .showBadges(true)
-            .showFullScreenIntent(false)
-            .showLights(false)
-            .showInAmbientDisplay(false)
-        if (Build.VERSION.SDK_INT >= 30) {
-            builder.allowConversations(ZenPolicy.CONVERSATION_SENDERS_NONE)
-        }
-        if (Build.VERSION.SDK_INT >= 35) {
-            builder.allowPriorityChannels(false)
-        }
-        return builder.build()
-    }
-
     private fun setRuleState(active: Boolean, reason: String, force: Boolean) {
+        if (active) {
+            ruleDesired = false
+            return
+        }
         if (updatesDisabled && !force) {
             if (!active) {
                 ruleDesired = false

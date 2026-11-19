@@ -39,6 +39,6 @@ internal object Grants {
     }
 
     fun core(context: Context): Boolean {
-        return notificationAccess(context) && policy(context) && overlay(context)
+        return notificationAccess(context) && overlay(context)
     }
 }

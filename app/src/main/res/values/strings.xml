@@ -5,16 +5,16 @@
     <string name="rule_trigger">While a chosen app is in front</string>
 
     <string name="setup_title">Ribbon Notifs</string>
-    <string name="setup_intro">While a chosen app is open, banners are replaced by a scrolling line, and the alerts stay in the shade.</string>
+    <string name="setup_intro">While a chosen app is open, ordinary alerts scroll by on a ribbon. Calls, alarms, and media are left alone.</string>
 
     <string name="master_label">Ribbon Notifs on</string>
-    <string name="master_summary">Turns on by itself while a chosen app is in front. Ordinary alerts go silent and stay in the shade. Calls, alarms, and media still come through.</string>
-    <string name="master_blocked">The switch stays off until notification access, Do Not Disturb access, and display over other apps are all granted.</string>
+    <string name="master_summary">Turns on by itself while a chosen app is in front. Ordinary alerts scroll by on the ribbon. Calls, alarms, and media still come through.</string>
+    <string name="master_blocked">The switch stays off until notification access and display over other apps are both granted.</string>
 
     <string name="perm_notification">Notification access</string>
     <string name="perm_notification_why">Reads the title and text for the strip. When the notification access screen shows toggles, leave alerting, silent, and conversations on for Ribbon Notifs.</string>
     <string name="perm_policy">Do Not Disturb access</string>
-    <string name="perm_policy_why">Lets Ribbon Notifs hide banners for ordinary alerts. Those alerts stay in the shade, without sound or vibration.</string>
+    <string name="perm_policy_why">Used only to turn off a Do Not Disturb rule left behind by an older version. The ribbon does not turn Do Not Disturb on.</string>
     <string name="perm_overlay">Display over other apps</string>
     <string name="perm_overlay_why">Draws the thin strip. The strip does not take taps, so the app underneath still receives every touch.</string>
     <string name="perm_usage">Usage access</string>
@@ -24,7 +24,7 @@
     <string name="state_missing">Missing</string>
     <string name="open_settings">Open</string>
     <string name="settings_note">These are system settings, not one-time permission dialogs. Android can ask for them again after Ribbon Notifs sits unused for a long time.</string>
-    <string name="policy_warning">Do Not Disturb access is off, so banners will keep appearing. The strip can still show alerts the listener sees.</string>
+    <string name="policy_warning">Do Not Disturb access is off. Grant it only if an older rule is still on and you want the Turn DND off button to work.</string>
     <string name="settings_unavailable">That system screen is not available on this phone.</string>
     <string name="overlay_needed">Allow display over other apps before previewing the strip.</string>
 
@@ -60,10 +60,10 @@
     <string name="choose_apps">Choose apps</string>
     <string name="preview_strip">Preview the strip</string>
     <string name="preview_line">Ribbon Notifs: This is a preview ribbon notification. Adjust the size, scrolling speed and background to preview. This is what it looks like across the screen.</string>
-    <string name="rule_off_info">If silence stays on after leaving a chosen app, this turns DND off.</string>
+    <string name="rule_off_info">If an older version left Do Not Disturb on, this turns that rule off. Ribbon Notifs does not turn it on.</string>
     <string name="rule_off_info_action">Explain DND</string>
     <string name="about_title">About</string>
-    <string name="about_summary">While a chosen app is in front, ordinary alerts go silent and scroll by as a ribbon.</string>
+    <string name="about_summary">While a chosen app is in front, ordinary alerts scroll by as a ribbon.</string>
     <string name="turn_rule_off">Turn DND off now</string>
     <string name="debug_title">Notification debug</string>
     <string name="debug_summary">Records why each alert was shown or skipped. Message text is not included.</string>
@@ -83,6 +83,6 @@
     <string name="loading_apps">Loading apps…</string>
     <string name="apps_load_failed">The app list could not be loaded.</string>
 
-    <string name="rule_body">Ribbon Notifs turns on while a selected app is open. Notifications stay in the shade.</string>
-    <string name="rule_detail">Ordinary alerts go silent for that time. Calls, alarms, and media still come through. Turn it off from Ribbon Notifs, or leave the selected app.</string>
+    <string name="rule_body">Ribbon Notifs shows a scrolling line while a selected app is open.</string>
+    <string name="rule_detail">Calls, alarms, and media still come through. This does not turn Do Not Disturb on.</string>
 </resources>
