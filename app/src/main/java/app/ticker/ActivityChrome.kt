@@ -1,6 +1,7 @@
 package app.ticker
 
 import android.app.Activity
+import android.content.res.Configuration
 import android.os.Build
 import android.view.Gravity
 import android.view.View
@@ -9,14 +10,11 @@ import android.view.WindowInsetsController
 import android.widget.FrameLayout
 
 internal fun Activity.installSystemBarPadding(root: View) {
+    applySystemBarContrast()
     if (Build.VERSION.SDK_INT < 30) return
     @Suppress("DEPRECATION")
     window.setDecorFitsSystemWindows(false)
-    window.insetsController?.setSystemBarsAppearance(
-        0,
-        WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
-            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
-    )
+    applySystemBarContrast()
     root.setOnApplyWindowInsetsListener { view, insets ->
         val bars = insets.getInsets(
             WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout()
@@ -25,6 +23,25 @@ internal fun Activity.installSystemBarPadding(root: View) {
         insets
     }
     root.requestApplyInsets()
+}
+
+@Suppress("DEPRECATION")
+private fun Activity.applySystemBarContrast() {
+    val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
+    val lightUi = night == Configuration.UI_MODE_NIGHT_NO
+    if (Build.VERSION.SDK_INT >= 30) {
+        val mask = WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS or
+            WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+        window.insetsController?.setSystemBarsAppearance(if (lightUi) mask else 0, mask)
+        return
+    }
+    val light = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+    val decor = window.decorView
+    decor.systemUiVisibility = if (lightUi) {
+        decor.systemUiVisibility or light
+    } else {
+        decor.systemUiVisibility and light.inv()
+    }
 }
 
 internal fun Activity.capContentWidth(root: View) {

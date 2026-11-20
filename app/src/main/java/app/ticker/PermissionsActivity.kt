@@ -1,5 +1,6 @@
 package app.ticker
 
+import android.content.Context
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -14,6 +15,10 @@ class PermissionsActivity : android.app.Activity() {
     private val states = ArrayList<TextView>()
 
     private val listener = TickerController.Listener { render() }
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppTheme.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

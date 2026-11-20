@@ -12,6 +12,12 @@ internal class TickerPrefs(context: Context) {
             prefs.edit().putBoolean(KEY_MASTER, value).apply()
         }
 
+    var appTheme: Int
+        get() = AppTheme.normalize(prefs.getInt(KEY_APP_THEME, AppTheme.DARK))
+        set(value) {
+            prefs.edit().putInt(KEY_APP_THEME, AppTheme.normalize(value)).apply()
+        }
+
     var ruleId: String?
         get() = prefs.getString(KEY_RULE, null)?.takeIf { it.isNotEmpty() }
         set(value) {
@@ -122,6 +128,7 @@ internal class TickerPrefs(context: Context) {
     private companion object {
         const val NAME = "ticker"
         const val KEY_MASTER = "master_enabled"
+        const val KEY_APP_THEME = "app_theme"
         const val KEY_RULE = "zen_rule_id"
         const val KEY_RULE_SHAPE = "zen_rule_shape"
         const val KEY_PACKAGES = "selected_packages"

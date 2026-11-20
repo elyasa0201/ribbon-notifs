@@ -1,5 +1,6 @@
 package app.ticker
 
+import android.content.Context
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -13,6 +14,8 @@ class AppearanceActivity : android.app.Activity() {
     private val controller: TickerController
         get() = (application as TickerApp).controller
 
+    private val themeIds = intArrayOf(R.id.theme_light, R.id.theme_dark, R.id.theme_system)
+    private val themeValues = intArrayOf(AppTheme.LIGHT, AppTheme.DARK, AppTheme.SYSTEM)
     private val sizeIds = intArrayOf(R.id.size_xs, R.id.size_s, R.id.size_m, R.id.size_l, R.id.size_xl)
     private val speedIds = intArrayOf(
         R.id.speed_025,
@@ -23,6 +26,10 @@ class AppearanceActivity : android.app.Activity() {
     )
     private var rendering = false
 
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppTheme.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_appearance)
@@ -30,6 +37,7 @@ class AppearanceActivity : android.app.Activity() {
         installSystemBarPadding(root)
         capContentWidth(root)
         bindTabs(AppTab.APPEARANCE)
+        bindTheme()
 
         findViewById<View>(R.id.preview_strip).setOnClickListener {
             if (!controller.previewStrip()) {
@@ -100,6 +108,28 @@ class AppearanceActivity : android.app.Activity() {
         rendering = false
         paintTextColor()
         paintBackground()
+    }
+
+    private fun bindTheme() {
+        themeIds.forEachIndexed { index, id ->
+            findViewById<TextView>(id).setOnClickListener {
+                val next = themeValues[index]
+                if (TickerPrefs(this).appTheme == next) return@setOnClickListener
+                TickerPrefs(this).appTheme = next
+                recreate()
+            }
+        }
+        paintTheme()
+    }
+
+    private fun paintTheme() {
+        val selected = TickerPrefs(this).appTheme
+        themeIds.forEachIndexed { index, id ->
+            val view = findViewById<TextView>(id)
+            val on = themeValues[index] == selected
+            view.setBackgroundResource(if (on) R.drawable.bg_tab_selected else 0)
+            view.setTextColor(getColor(if (on) R.color.ink else R.color.muted))
+        }
     }
 
     private fun paintSteps(ids: IntArray, values: IntArray, selected: Int) {

@@ -1,5 +1,6 @@
 package app.ticker
 
+import android.content.Context
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
@@ -23,6 +24,10 @@ class AppsActivity : android.app.Activity() {
     private var rendering = false
 
     private val listener = TickerController.Listener { renderMaster() }
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppTheme.wrap(newBase))
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
