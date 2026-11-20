@@ -1,6 +1,5 @@
 package app.ticker
 
-import android.app.AlertDialog
 import android.os.Bundle
 import android.view.View
 import android.widget.Button
@@ -11,8 +10,6 @@ class PermissionsActivity : android.app.Activity() {
     private val controller: TickerController
         get() = (application as TickerApp).controller
 
-    private lateinit var warning: TextView
-    private lateinit var status: TextView
     private lateinit var debugLog: TextView
     private val states = ArrayList<TextView>()
 
@@ -25,25 +22,12 @@ class PermissionsActivity : android.app.Activity() {
         installSystemBarPadding(root)
         capContentWidth(root)
         bindTabs(AppTab.PERMISSIONS)
-        warning = findViewById(R.id.policy_warning)
-        status = findViewById(R.id.rule_status)
         debugLog = findViewById(R.id.debug_log)
-        findViewById<View>(R.id.turn_rule_off).setOnClickListener {
-            controller.turnRuleOffNow()
-            render()
-        }
-        findViewById<View>(R.id.rule_info).setOnClickListener {
-            AlertDialog.Builder(this)
-                .setMessage(R.string.rule_off_info)
-                .setPositiveButton(android.R.string.ok, null)
-                .show()
-        }
         findViewById<View>(R.id.share_debug).setOnClickListener {
             DecisionLog.share(this)
         }
         val rows = listOf(
             Perm(R.string.perm_notification, R.string.perm_notification_why) { openNotificationAccess(this) },
-            Perm(R.string.perm_policy, R.string.perm_policy_why) { openPolicyAccess(this) },
             Perm(R.string.perm_overlay, R.string.perm_overlay_why) { openOverlayAccess(this) },
             Perm(R.string.perm_usage, R.string.perm_usage_why) { openUsageAccess(this) }
         )
@@ -78,7 +62,6 @@ class PermissionsActivity : android.app.Activity() {
     private fun render() {
         val granted = listOf(
             Grants.notificationAccess(this),
-            Grants.policy(this),
             Grants.overlay(this),
             Grants.usage(this)
         )
@@ -87,11 +70,6 @@ class PermissionsActivity : android.app.Activity() {
             states[index].setText(if (ok) R.string.state_granted else R.string.state_missing)
             states[index].setTextColor(getColor(if (ok) R.color.accent else R.color.missing))
         }
-        warning.visibility = if (Grants.policy(this)) View.GONE else View.VISIBLE
-        val saved = if (controller.ruleSaved) getString(R.string.rule_saved) else getString(R.string.rule_not_saved)
-        val active = if (controller.isRuleActive) getString(R.string.rule_active) else getString(R.string.rule_inactive)
-        val extra = if (controller.ruleCreateFailed) "\n${getString(R.string.rule_create_failed)}" else ""
-        status.text = "$saved\n$active$extra"
         debugLog.text = DecisionLog.recent(this, 12) ?: getString(R.string.debug_empty)
     }
 

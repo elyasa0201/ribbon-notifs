@@ -7,7 +7,6 @@ import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.BroadcastReceiver
 import android.content.ComponentCallbacks
-import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -21,12 +20,10 @@ import android.os.Parcelable
 import android.os.PowerManager
 import android.os.SystemClock
 import android.os.UserManager
-import android.service.notification.Condition
 import android.service.notification.NotificationListenerService.Ranking
 import android.service.notification.NotificationListenerService.RankingMap
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import android.net.Uri
 import java.util.ArrayDeque
 
 /**
@@ -36,8 +33,7 @@ import java.util.ArrayDeque
  * media are left in place. Do Not Disturb is never turned on.
  *
  * Failure handling lives here: a missing grant, a null usage result before the
- * first unlock after boot, listener disconnect, and a process start that finds
- * an older zen rule still true.
+ * first unlock after boot, and listener disconnect.
  */
 internal class TickerController(private val app: Context) {
     fun interface Listener {
@@ -53,16 +49,9 @@ internal class TickerController(private val app: Context) {
 
     private var listenerConnected = false
     private var armed = false
-    private var ruleActive = false
-    private var rulePending = false
-    private var suppressRearm = false
-    private var ownOffEchoes = 0
-    private var updatesDisabled = false
     private var currentForeground: String? = null
     private var showing: Line? = null
-    private var ruleError = false
     private var usageWarned = false
-    private var lastCreateFailure: String? = null
     private var pollThread: HandlerThread? = null
     private var pollHandler: Handler? = null
     private val shownUpdateKeys = ArrayDeque<String>()
@@ -78,13 +67,7 @@ internal class TickerController(private val app: Context) {
     /** Removes one posted notification. Returns false when the listener call fails. */
     internal var dismissNotification: ((String) -> Boolean)? = null
 
-    internal var ruleDesired: Boolean = false
-        private set
-
     val masterEnabled: Boolean get() = prefs.masterEnabled
-    val ruleSaved: Boolean get() = prefs.ruleId != null
-    val isRuleActive: Boolean get() = ruleActive
-    val ruleCreateFailed: Boolean get() = ruleError
     fun isSelected(packageName: String): Boolean = packageName in prefs.selectedPackages
 
     fun addListener(listener: Listener) {
@@ -97,19 +80,12 @@ internal class TickerController(private val app: Context) {
 
     fun onProcessStart() {
         registerReceivers()
-        // A process death after STATE_TRUE can leave the mode on. Clear it
-        // before the foreground check is allowed to arm again.
-        if (Grants.policy(app)) ensureRule()
-        setRuleState(active = false, reason = "process start", force = true)
         armed = false
         closeArrivalGate()
-        ruleActive = false
-        suppressRearm = false
         refreshInstalledApps()
     }
 
     fun onSetupVisible() {
-        if (Grants.policy(app)) ensureRule()
         if (prefs.masterEnabled && !Grants.core(app)) {
             setMasterEnabled(false)
         } else {
@@ -127,8 +103,6 @@ internal class TickerController(private val app: Context) {
         if (!enabled) {
             armed = false
             closeArrivalGate()
-            suppressRearm = false
-            setRuleState(active = false, reason = "master off", force = false)
             clearStrip()
         }
         changed()
@@ -197,15 +171,6 @@ internal class TickerController(private val app: Context) {
         prefs.retainInstalled(apps.map { it.packageName }.toSet())
     }
 
-    fun turnRuleOffNow() {
-        armed = false
-        closeArrivalGate()
-        suppressRearm = false
-        setRuleState(active = false, reason = "manual off", force = true)
-        dropAlertLines()
-        changed()
-    }
-
     fun previewStrip(): Boolean {
         if (!Grants.overlay(app)) return false
         enqueue(Line(app.getString(R.string.preview_line), preview = true, packageName = null))
@@ -214,13 +179,8 @@ internal class TickerController(private val app: Context) {
 
     fun onListenerConnected() {
         listenerConnected = true
-        if (Grants.policy(app)) ensureRule()
-        suppressRearm = false
-        updatesDisabled = false
-        setRuleState(active = false, reason = "listener connected", force = true)
         armed = false
         closeArrivalGate()
-        ruleActive = false
         startPolling()
         changed()
     }
@@ -231,7 +191,6 @@ internal class TickerController(private val app: Context) {
         armed = false
         closeArrivalGate()
         clearStrip()
-        setRuleState(active = false, reason = "listener disconnected", force = true)
         note("listener disconnected ${contextLine()}")
     }
 
@@ -389,13 +348,10 @@ internal class TickerController(private val app: Context) {
             addAction(Intent.ACTION_SCREEN_ON)
             addAction(Intent.ACTION_USER_PRESENT)
         }
-        val zen = IntentFilter(NotificationManager.ACTION_AUTOMATIC_ZEN_RULE_STATUS_CHANGED)
         if (Build.VERSION.SDK_INT >= 33) {
             app.registerReceiver(screenReceiver, screen, Context.RECEIVER_NOT_EXPORTED)
-            app.registerReceiver(zenReceiver, zen, Context.RECEIVER_NOT_EXPORTED)
         } else {
             app.registerReceiver(screenReceiver, screen)
-            app.registerReceiver(zenReceiver, zen)
         }
         app.registerComponentCallbacks(object : ComponentCallbacks {
             override fun onConfigurationChanged(newConfig: Configuration) {
@@ -424,64 +380,6 @@ internal class TickerController(private val app: Context) {
         override fun onReceive(context: Context, intent: Intent) {
             syncStripVisibility()
         }
-    }
-
-    private val zenReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            if (intent.action != NotificationManager.ACTION_AUTOMATIC_ZEN_RULE_STATUS_CHANGED) return
-            val id = intent.getStringExtra(NotificationManager.EXTRA_AUTOMATIC_ZEN_RULE_ID)
-            if (id == null || id != prefs.ruleId) return
-            val status = intent.getIntExtra(
-                NotificationManager.EXTRA_AUTOMATIC_ZEN_RULE_STATUS,
-                NotificationManager.AUTOMATIC_RULE_STATUS_UNKNOWN
-            )
-            onZenStatus(status)
-        }
-    }
-
-    private fun onZenStatus(status: Int) {
-        var deactivatedWhy = ""
-        when (status) {
-            NotificationManager.AUTOMATIC_RULE_STATUS_REMOVED -> {
-                prefs.ruleId = null
-                ruleActive = false
-                rulePending = false
-                suppressRearm = false
-                updatesDisabled = false
-                ruleError = false
-            }
-            NotificationManager.AUTOMATIC_RULE_STATUS_DEACTIVATED -> {
-                ruleActive = false
-                rulePending = false
-                // STATE_FALSE also reports the rule inactive. That echo is not a
-                // snooze. A snooze is the user turning it off while a selected
-                // app is still in front.
-                if (ownOffEchoes > 0) {
-                    ownOffEchoes--
-                    deactivatedWhy = " ignored reason=own-off"
-                } else if (armed && ruleDesired) {
-                    suppressRearm = true
-                    deactivatedWhy = " reason=user-snooze"
-                } else {
-                    deactivatedWhy = " ignored reason=not-in-app"
-                }
-            }
-            NotificationManager.AUTOMATIC_RULE_STATUS_DISABLED -> {
-                ruleActive = false
-                rulePending = false
-                updatesDisabled = true
-                suppressRearm = true
-            }
-            NotificationManager.AUTOMATIC_RULE_STATUS_ENABLED -> updatesDisabled = false
-            NotificationManager.AUTOMATIC_RULE_STATUS_ACTIVATED -> {
-                ruleActive = true
-                rulePending = false
-                // An older install can still be switched on by the system. Turn it
-                // back off. This app does not activate the rule itself.
-                setRuleState(active = false, reason = "unexpected-on", force = true)
-            }
-        }
-        note("zen ${zenStatusName(status)}$deactivatedWhy ${contextLine()}")
     }
 
     private fun startPolling() {
@@ -590,166 +488,16 @@ internal class TickerController(private val app: Context) {
             armed = true
             currentForeground = packageName
             val baseline = if (entered) captureBaseline() else null
-            if (ruleActive || ruleDesired) {
-                setRuleState(active = false, reason = "foreground", force = true)
-            }
             if (entered) note("armed ${contextLine()} baseline=$baseline")
-        } else if (armed || ruleActive || suppressRearm) {
+        } else if (armed) {
             armed = false
             closeArrivalGate()
             currentForeground = packageName
-            suppressRearm = false
-            setRuleState(active = false, reason = "left foreground", force = false)
             dropAlertLines()
             note("disarmed ${contextLine()} reason=left")
         } else {
             currentForeground = packageName
         }
-    }
-
-    /**
-     * Finds a rule an older install already saved, so Turn DND off can reach it.
-     * Does not create or update a rule, and does not turn one on.
-     */
-    private fun ensureRule() {
-        if (!Grants.policy(app)) return
-        val manager = notificationManager() ?: return
-        val saved = prefs.ruleId
-        if (saved != null) {
-            val existing = try {
-                manager.getAutomaticZenRule(saved)
-            } catch (error: RuntimeException) {
-                ruleError = true
-                noteCreate("rule read failed ${contextLine()} ${failureText(error)}")
-                return
-            }
-            if (existing != null) {
-                ruleError = false
-                return
-            }
-            prefs.ruleId = null
-        }
-        val adopted = findOwnedRule(manager) ?: return
-        prefs.ruleId = adopted
-        ruleError = false
-        noteCreate("rule adopted ${contextLine()}")
-    }
-
-    private fun findOwnedRule(manager: NotificationManager): String? {
-        val rules = try {
-            manager.automaticZenRules
-        } catch (_: RuntimeException) {
-            return null
-        } ?: return null
-        val condition = conditionId()
-        val activity = configurationActivity()
-        val provider = conditionProvider()
-        return rules.entries.firstOrNull { (_, rule) ->
-            rule.conditionId == condition ||
-                rule.configurationActivity == activity ||
-                rule.owner == provider
-        }?.key
-    }
-
-    private fun configurationActivity(): ComponentName {
-        return ComponentName(app, RuleExplanationActivity::class.java)
-    }
-
-    private fun conditionProvider(): ComponentName {
-        return ComponentName(app, TickerConditionService::class.java)
-    }
-
-    private fun failureText(error: Throwable): String {
-        val parts = ArrayList<String>()
-        var current: Throwable? = error
-        var guard = 0
-        while (current != null && guard < 3) {
-            val message = current.message?.replace('\n', ' ')?.replace('\r', ' ')?.trim()
-            val name = current.javaClass.simpleName.ifEmpty { current.javaClass.name }
-            parts.add(if (message.isNullOrEmpty()) name else "$name: $message")
-            current = current.cause
-            guard += 1
-        }
-        return parts.joinToString(" caused by ").take(400)
-    }
-
-    private fun noteCreate(message: String) {
-        if (message == lastCreateFailure) return
-        lastCreateFailure = message
-        note(message)
-    }
-
-    private fun setRuleState(active: Boolean, reason: String, force: Boolean) {
-        if (active) {
-            ruleDesired = false
-            return
-        }
-        if (updatesDisabled && !force) {
-            if (!active) {
-                ruleDesired = false
-                ruleActive = false
-            }
-            return
-        }
-        ruleDesired = active
-        val id = prefs.ruleId ?: run {
-            ruleActive = false
-            TickerConditionService.publish()
-            return
-        }
-        if (!Grants.policy(app)) {
-            ruleActive = false
-            return
-        }
-        val manager = notificationManager() ?: return
-        val state = if (active) Condition.STATE_TRUE else Condition.STATE_FALSE
-        val summary = if (active) "A selected app is open" else "Off"
-        // SOURCE_USER_ACTION would override a snooze. The default source lets
-        // the user's snooze win until we later send STATE_FALSE.
-        if (!active) ownOffEchoes++
-        val condition = Condition(conditionId(), summary, state)
-        try {
-            manager.setAutomaticZenRuleState(id, condition)
-        } catch (error: SecurityException) {
-            if (!active) ownOffEchoes = (ownOffEchoes - 1).coerceAtLeast(0)
-            ruleActive = false
-            note("rule denied ${contextLine()} reason=$reason ${failureText(error)}")
-            return
-        } catch (error: IllegalArgumentException) {
-            if (!active) ownOffEchoes = (ownOffEchoes - 1).coerceAtLeast(0)
-            prefs.ruleId = null
-            ruleActive = false
-            ruleError = true
-            note("rule id rejected ${contextLine()} reason=$reason ${failureText(error)}")
-            return
-        }
-        TickerConditionService.publish()
-        if (active && Build.VERSION.SDK_INT >= 35) {
-            val actual = try {
-                manager.getAutomaticZenRuleState(id)
-            } catch (_: SecurityException) {
-                Condition.STATE_UNKNOWN
-            }
-            // Samsung applies the condition after this call returns. A state
-            // that is not TRUE yet is not a snooze. Retry on the next poll.
-            if (actual != Condition.STATE_TRUE) {
-                ruleActive = false
-                if (!rulePending) {
-                    rulePending = true
-                    note("rule pending actual=$actual ${contextLine()} reason=$reason")
-                }
-                return
-            }
-        }
-        rulePending = false
-        ruleActive = active
-        note("rule ${if (active) "on" else "off"} ${contextLine()} reason=$reason")
-    }
-
-    private fun conditionId(): Uri = Uri.parse("condition://${app.packageName}/armed")
-
-    private fun notificationManager(): NotificationManager? {
-        return app.getSystemService(NotificationManager::class.java)
     }
 
     private fun enqueue(line: Line) {
@@ -989,29 +737,7 @@ internal class TickerController(private val app: Context) {
     }
 
     private fun contextLine(): String {
-        return "armed=$armed fg=${currentForeground ?: "-"} listener=$listenerConnected rule=${ruleStateLabel()}"
-    }
-
-    private fun ruleStateLabel(): String {
-        val saved = if (prefs.ruleId == null) "unsaved" else "saved"
-        val active = if (ruleActive) "active" else "inactive"
-        val flags = ArrayList<String>()
-        if (suppressRearm) flags.add("snoozed")
-        if (updatesDisabled) flags.add("disabled")
-        if (ruleError) flags.add("error")
-        val extra = if (flags.isEmpty()) "" else " " + flags.joinToString(",")
-        return "$saved/$active$extra"
-    }
-
-    private fun zenStatusName(status: Int): String {
-        return when (status) {
-            NotificationManager.AUTOMATIC_RULE_STATUS_REMOVED -> "removed"
-            NotificationManager.AUTOMATIC_RULE_STATUS_DEACTIVATED -> "deactivated"
-            NotificationManager.AUTOMATIC_RULE_STATUS_DISABLED -> "disabled"
-            NotificationManager.AUTOMATIC_RULE_STATUS_ENABLED -> "enabled"
-            NotificationManager.AUTOMATIC_RULE_STATUS_ACTIVATED -> "activated"
-            else -> status.toString()
-        }
+        return "armed=$armed fg=${currentForeground ?: "-"} listener=$listenerConnected"
     }
 
     private fun ordinaryAlert(rank: Int, channel: Int?, peekSuppressed: Boolean): Boolean {

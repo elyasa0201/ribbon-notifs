@@ -1,7 +1,6 @@
 package app.ticker
 
 import android.app.AppOpsManager
-import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.os.Process
@@ -20,11 +19,6 @@ internal object Grants {
         }
     }
 
-    fun policy(context: Context): Boolean {
-        val manager = context.getSystemService(NotificationManager::class.java) ?: return false
-        return manager.isNotificationPolicyAccessGranted
-    }
-
     fun overlay(context: Context): Boolean = Settings.canDrawOverlays(context)
 
     fun usage(context: Context): Boolean {
@@ -39,6 +33,6 @@ internal object Grants {
     }
 
     fun core(context: Context): Boolean {
-        return notificationAccess(context) && overlay(context)
+        return notificationAccess(context) && usage(context) && overlay(context)
     }
 }

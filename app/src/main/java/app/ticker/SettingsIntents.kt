@@ -11,10 +11,6 @@ internal fun openNotificationAccess(activity: Activity) {
     open(activity, Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
 }
 
-internal fun openPolicyAccess(activity: Activity) {
-    open(activity, Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
-}
-
 internal fun openOverlayAccess(activity: Activity) {
     val intent = Intent(
         Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
