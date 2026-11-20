@@ -19,8 +19,12 @@
         android:textSize="22sp" />
 
     <LinearLayout
+        android:id="@+id/master_row"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:background="?android:attr/selectableItemBackground"
+        android:clickable="true"
+        android:focusable="true"
         android:gravity="center_vertical"
         android:minHeight="72dp"
         android:orientation="horizontal"

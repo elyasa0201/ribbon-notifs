@@ -15,6 +15,7 @@ class AppsActivity : android.app.Activity() {
         get() = (application as TickerApp).controller
 
     private lateinit var empty: TextView
+    private lateinit var masterRow: View
     private lateinit var master: Switch
     private lateinit var blocked: TextView
     private lateinit var adapter: AppAdapter
@@ -38,12 +39,17 @@ class AppsActivity : android.app.Activity() {
         bindTabs(AppTab.APPS)
         val list = findViewById<ListView>(R.id.app_list)
         empty = findViewById(R.id.empty)
+        masterRow = findViewById(R.id.master_row)
         master = findViewById(R.id.master_switch)
         blocked = findViewById(R.id.master_blocked)
         master.setOnCheckedChangeListener { _, checked ->
             if (rendering) return@setOnCheckedChangeListener
             controller.setMasterEnabled(checked)
             renderMaster()
+        }
+        masterRow.setOnClickListener {
+            if (!master.isEnabled) return@setOnClickListener
+            master.toggle()
         }
         adapter = AppAdapter()
         list.adapter = adapter
@@ -90,6 +96,7 @@ class AppsActivity : android.app.Activity() {
         val core = Grants.core(this)
         rendering = true
         master.isEnabled = core
+        masterRow.isEnabled = core
         master.isChecked = controller.masterEnabled && core
         rendering = false
         blocked.visibility = if (core) View.GONE else View.VISIBLE
@@ -128,6 +135,7 @@ class AppsActivity : android.app.Activity() {
             toggle.setOnCheckedChangeListener { _, checked ->
                 controller.setPackageSelected(app.packageName, checked)
             }
+            view.setOnClickListener { toggle.toggle() }
             return view
         }
     }
