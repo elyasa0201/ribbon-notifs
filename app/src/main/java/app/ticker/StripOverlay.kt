@@ -16,6 +16,7 @@ import android.util.Log
 import android.view.Display
 import android.view.Gravity
 import android.view.Surface
+import android.util.AttributeSet
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowManager
@@ -462,7 +463,10 @@ internal class StripOverlay(private val app: Context) {
     }
 }
 
-internal class StripView(context: Context) : View(context) {
+internal class StripView @JvmOverloads constructor(
+    context: Context,
+    attrs: AttributeSet? = null
+) : View(context, attrs) {
     private val paint = android.text.TextPaint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.WHITE
         textSize = android.util.TypedValue.applyDimension(
@@ -477,6 +481,7 @@ internal class StripView(context: Context) : View(context) {
     private var offset = 0f
     private var lastFrame = 0L
     private var posted = false
+    private var looping = false
     var finishCallback: (() -> Unit)? = null
         private set
     var tapCallback: ((Context) -> Unit)? = null
@@ -510,6 +515,7 @@ internal class StripView(context: Context) : View(context) {
     }
 
     fun show(text: String, onTap: ((Context) -> Unit)?, onFinished: () -> Unit) {
+        looping = false
         line = text
         tapCallback = onTap
         finishCallback = onFinished
@@ -526,6 +532,44 @@ internal class StripView(context: Context) : View(context) {
         }
         start()
         invalidate()
+    }
+
+    /** In-app preview. Loops until [stopDemo]. Does not use the overlay window. */
+    fun playDemo(appearance: StripAppearance, text: String) {
+        applyAppearance(appearance)
+        val height = preferredHeight(appearance.textSizeSp)
+        layoutParams?.let { params ->
+            if (params.height != height) {
+                params.height = height
+                layoutParams = params
+            }
+        }
+        val same = looping && line == text
+        looping = true
+        line = text
+        tapCallback = null
+        isClickable = false
+        setOnClickListener(null)
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        if (!same) {
+            offset = 0f
+            lastFrame = SystemClock.uptimeMillis()
+        }
+        contentDescription = text
+        start()
+        invalidate()
+    }
+
+    fun stopDemo() {
+        looping = false
+        stop()
+    }
+
+    fun preferredHeight(textSp: Int): Int {
+        val density = resources.displayMetrics.density
+        val base = (32 * density).toInt()
+        val needed = (textSp * density + 12 * density).toInt()
+        return maxOf(base, needed).coerceAtLeast(1)
     }
 
     fun restoreOffset(value: Float) {
@@ -561,7 +605,7 @@ internal class StripView(context: Context) : View(context) {
 
     private fun frame() {
         posted = false
-        if (finishCallback == null || !isAttachedToWindow) return
+        if ((!looping && finishCallback == null) || !isAttachedToWindow) return
         val now = SystemClock.uptimeMillis()
         val dt = (now - lastFrame).coerceIn(0L, 50L)
         lastFrame = now
@@ -578,6 +622,12 @@ internal class StripView(context: Context) : View(context) {
         val speed = speedDp * resources.displayMetrics.density
         offset = (offset + speed * dt / 1000f).coerceAtMost(travel)
         if (offset >= travel - 0.5f) {
+            if (looping) {
+                offset = 0f
+                invalidate()
+                start()
+                return
+            }
             val done = finishCallback
             finishCallback = null
             stop()

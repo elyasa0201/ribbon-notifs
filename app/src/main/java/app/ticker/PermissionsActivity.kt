@@ -3,8 +3,11 @@ package app.ticker
 import android.content.Context
 import android.os.Bundle
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.Spinner
 import android.widget.TextView
 
 class PermissionsActivity : android.app.Activity() {
@@ -13,6 +16,7 @@ class PermissionsActivity : android.app.Activity() {
 
     private lateinit var debugLog: TextView
     private val states = ArrayList<TextView>()
+    private var rendering = false
 
     private val listener = TickerController.Listener { render() }
 
@@ -31,6 +35,7 @@ class PermissionsActivity : android.app.Activity() {
         findViewById<View>(R.id.share_debug).setOnClickListener {
             DecisionLog.share(this)
         }
+        bindTheme()
         val rows = listOf(
             Perm(R.string.perm_notification, R.string.perm_notification_why) { openNotificationAccess(this) },
             Perm(R.string.perm_overlay, R.string.perm_overlay_why) { openOverlayAccess(this) },
@@ -62,6 +67,34 @@ class PermissionsActivity : android.app.Activity() {
     override fun onStop() {
         controller.removeListener(listener)
         super.onStop()
+    }
+
+    private fun bindTheme() {
+        val labels = arrayOf(
+            getString(R.string.theme_light),
+            getString(R.string.theme_dark),
+            getString(R.string.theme_system)
+        )
+        val values = intArrayOf(AppTheme.LIGHT, AppTheme.DARK, AppTheme.SYSTEM)
+        val spinner = findViewById<Spinner>(R.id.theme_spinner)
+        val choices = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels)
+        choices.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        spinner.adapter = choices
+        rendering = true
+        val current = values.indexOf(TickerPrefs(this).appTheme).coerceAtLeast(0)
+        spinner.setSelection(current)
+        rendering = false
+        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>, view: View?, position: Int, id: Long) {
+                if (rendering) return
+                val next = values[position]
+                if (TickerPrefs(this@PermissionsActivity).appTheme == next) return
+                TickerPrefs(this@PermissionsActivity).appTheme = next
+                recreate()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>) = Unit
+        }
     }
 
     private fun render() {

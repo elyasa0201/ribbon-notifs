@@ -172,6 +172,8 @@ internal class TickerController(private val app: Context) {
         overlay.applyAppearance(currentAppearance())
     }
 
+    fun stripAppearance(): StripAppearance = currentAppearance()
+
     private fun currentAppearance(): StripAppearance {
         return StripAppearance(
             prefs.textSizeSp,

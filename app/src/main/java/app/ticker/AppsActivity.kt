@@ -1,6 +1,7 @@
 package app.ticker
 
 import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.view.View
 import android.view.ViewGroup
@@ -18,11 +19,13 @@ class AppsActivity : android.app.Activity() {
     private lateinit var masterRow: View
     private lateinit var master: Switch
     private lateinit var blocked: TextView
-    private lateinit var adapter: AppAdapter
+    private lateinit var ribbon: StripView
+    private lateinit var adapter: SelectedAdapter
     private var all = emptyList<LaunchableApp>()
     private var loaded = false
     private var failed = false
     private var rendering = false
+    private var screenVisible = false
 
     private val listener = TickerController.Listener { renderMaster() }
 
@@ -37,6 +40,9 @@ class AppsActivity : android.app.Activity() {
         installSystemBarPadding(root)
         capContentWidth(root)
         bindTabs(AppTab.APPS)
+        val tile = findViewById<View>(R.id.master_tile)
+        tile.clipToOutline = true
+        ribbon = findViewById(R.id.demo_ribbon)
         val list = findViewById<ListView>(R.id.app_list)
         empty = findViewById(R.id.empty)
         masterRow = findViewById(R.id.master_row)
@@ -51,9 +57,13 @@ class AppsActivity : android.app.Activity() {
             if (!master.isEnabled) return@setOnClickListener
             master.toggle()
         }
-        adapter = AppAdapter()
+        val open = View.OnClickListener { openPicker() }
+        findViewById<View>(R.id.selected_header).setOnClickListener(open)
+        empty.setOnClickListener(open)
+        adapter = SelectedAdapter()
         list.adapter = adapter
         list.emptyView = empty
+        list.setOnItemClickListener { _, _, _, _ -> openPicker() }
         Thread {
             val load = loadLaunchableApps(this)
             runOnUiThread {
@@ -63,7 +73,7 @@ class AppsActivity : android.app.Activity() {
                     is AppLoad.Ok -> {
                         all = load.apps
                         controller.noteInstalled(load.apps)
-                        showApps()
+                        showSelected()
                     }
                     is AppLoad.Failed -> {
                         failed = true
@@ -77,19 +87,28 @@ class AppsActivity : android.app.Activity() {
 
     override fun onStart() {
         super.onStart()
+        screenVisible = true
         controller.addListener(listener)
+        syncRibbon()
     }
 
     override fun onResume() {
         super.onResume()
         controller.onSetupVisible()
         renderMaster()
-        if (loaded && !failed) showApps()
+        if (loaded && !failed) showSelected()
     }
 
     override fun onStop() {
+        screenVisible = false
+        ribbon.stopDemo()
+        ribbon.visibility = View.GONE
         controller.removeListener(listener)
         super.onStop()
+    }
+
+    private fun openPicker() {
+        startActivity(Intent(this, AppPickerActivity::class.java))
     }
 
     private fun renderMaster() {
@@ -100,16 +119,27 @@ class AppsActivity : android.app.Activity() {
         master.isChecked = controller.masterEnabled && core
         rendering = false
         blocked.visibility = if (core) View.GONE else View.VISIBLE
+        syncRibbon()
     }
 
-    private fun showApps() {
-        empty.setText(
-            if (all.isEmpty()) R.string.no_launchable_apps else R.string.loading_apps
-        )
-        adapter.submit(all)
+    private fun syncRibbon() {
+        val show = screenVisible && master.isChecked
+        if (!show) {
+            ribbon.stopDemo()
+            ribbon.visibility = View.GONE
+            return
+        }
+        ribbon.visibility = View.VISIBLE
+        ribbon.playDemo(controller.stripAppearance(), getString(R.string.preview_line))
     }
 
-    private inner class AppAdapter : BaseAdapter() {
+    private fun showSelected() {
+        val chosen = all.filter { controller.isSelected(it.packageName) }
+        empty.setText(R.string.no_chosen_apps)
+        adapter.submit(chosen)
+    }
+
+    private inner class SelectedAdapter : BaseAdapter() {
         private var rows = emptyList<LaunchableApp>()
 
         fun submit(next: List<LaunchableApp>) {
@@ -122,20 +152,10 @@ class AppsActivity : android.app.Activity() {
         override fun getItemId(position: Int): Long = rows[position].packageName.hashCode().toLong()
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val view = convertView ?: layoutInflater.inflate(R.layout.row_app, parent, false)
+            val view = convertView ?: layoutInflater.inflate(R.layout.row_selected, parent, false)
             val app = rows[position]
-            val selected = controller.isSelected(app.packageName)
             view.findViewById<ImageView>(R.id.app_icon).setImageDrawable(app.icon)
             view.findViewById<TextView>(R.id.app_label).text = app.label
-            view.findViewById<TextView>(R.id.app_package).text = app.packageName
-            val toggle = view.findViewById<Switch>(R.id.app_switch)
-            toggle.setOnCheckedChangeListener(null)
-            toggle.isChecked = selected
-            toggle.contentDescription = app.label
-            toggle.setOnCheckedChangeListener { _, checked ->
-                controller.setPackageSelected(app.packageName, checked)
-            }
-            view.setOnClickListener { toggle.toggle() }
             return view
         }
     }

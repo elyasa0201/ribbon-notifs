@@ -9,6 +9,7 @@
 
     <string name="master_label">Ribbon Notifs on</string>
     <string name="master_summary">Turns on by itself while a chosen app is in front. Ordinary alerts scroll by on the ribbon. Calls, alarms, and media still come through.</string>
+    <string name="master_tile_body">When this is on, notifications in selected apps are shown as a ribbon.</string>
     <string name="master_blocked">The switch stays off until notification access, usage access, and display over other apps are all granted.</string>
 
     <string name="perm_notification">Notification access</string>
@@ -27,9 +28,10 @@
 
     <string name="tab_apps">Apps</string>
     <string name="tab_appearance">Customise</string>
-    <string name="tab_permissions">Permissions</string>
+    <string name="tab_permissions">App Settings</string>
     <string name="chosen_apps">Chosen apps</string>
-    <string name="no_chosen_apps">No apps chosen yet. Search to add one. Tap a chosen app to remove it.</string>
+    <string name="selected_apps">Selected apps</string>
+    <string name="no_chosen_apps">No apps chosen yet.</string>
     <string name="appearance_title">Customise</string>
     <string name="theme_label">Theme</string>
     <string name="theme_light">Light</string>
@@ -49,6 +51,8 @@
     <string name="speed_2">2x</string>
     <string name="bg_none">No background</string>
     <string name="background_label">Background</string>
+    <string name="colour_label">Colour</string>
+    <string name="brightness_label">Brightness</string>
     <string name="text_color_label">Text color</string>
     <string name="text_color_white">White</string>
     <string name="bg_default">Default background</string>
@@ -57,7 +61,7 @@
     <string name="bg_black">Black</string>
     <string name="bg_charcoal">Charcoal</string>
     <string name="bg_navy">Navy</string>
-    <string name="permissions_title">Permissions</string>
+    <string name="permissions_title">App Settings</string>
     <string name="choose_apps">Choose apps</string>
     <string name="preview_strip">Preview the strip</string>
     <string name="preview_line">Ribbon Notifs: This is a preview ribbon notification. Adjust the size, scrolling speed and background to preview. This is what it looks like across the screen.</string>
