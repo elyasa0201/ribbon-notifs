@@ -21,8 +21,9 @@ import android.view.WindowInsets
 import android.view.WindowManager
 
 /**
- * One non-touchable line under the status bar. The window flags are what let
- * taps fall through; the view itself never asks for focus.
+ * One line under the status bar. The window is only as tall as the strip, and
+ * it is not touch-modal, so taps outside the ribbon still reach the app
+ * underneath. A tap on the strip itself is delivered to [StripView].
  *
  * The window is pinned to the current display's full width and to one
  * vertical position. Hiding the status bar must not move it or freeze the
@@ -79,7 +80,12 @@ internal class StripOverlay(private val app: Context) {
 
     fun isShowing(): Boolean = view != null
 
-    fun show(text: String, appearance: StripAppearance, onFinished: () -> Unit): Boolean {
+    fun show(
+        text: String,
+        appearance: StripAppearance,
+        onTap: ((Context) -> Unit)?,
+        onFinished: () -> Unit
+    ): Boolean {
         this.appearance = appearance
         if (!Settings.canDrawOverlays(app)) return false
         val display = activeDisplay() ?: return false
@@ -89,7 +95,7 @@ internal class StripOverlay(private val app: Context) {
         }
         applyAppearance(appearance)
         val strip = view ?: return false
-        strip.show(text, onFinished)
+        strip.show(text, onTap, onFinished)
         schedulePlace()
         return true
     }
@@ -118,11 +124,12 @@ internal class StripOverlay(private val app: Context) {
             val strip = view ?: return
             val text = strip.currentText
             val finished = strip.finishCallback
+            val tap = strip.tapCallback
             val kept = strip.scrollOffset
             remove()
             if (text.isNotEmpty() && finished != null && add(display)) {
                 view?.applyAppearance(appearance)
-                view?.show(text, finished)
+                view?.show(text, tap, finished)
                 view?.restoreOffset(kept)
             } else {
                 finished?.invoke()
@@ -164,8 +171,10 @@ internal class StripOverlay(private val app: Context) {
             val span = displaySpan(display, manager)
             val density = context.resources.displayMetrics.density
             val height = stripHeight(density, appearance.textSizeSp)
+            // Not focusable, so the keyboard stays with the app underneath.
+            // Not touch-modal, so only the strip's own bounds take taps.
             var flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
             if (beyondScreen) {
                 flags = flags or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
@@ -470,6 +479,8 @@ internal class StripView(context: Context) : View(context) {
     private var posted = false
     var finishCallback: (() -> Unit)? = null
         private set
+    var tapCallback: ((Context) -> Unit)? = null
+        private set
 
     val currentText: String get() = line
     val scrollOffset: Float get() = offset
@@ -498,12 +509,21 @@ internal class StripView(context: Context) : View(context) {
         invalidate()
     }
 
-    fun show(text: String, onFinished: () -> Unit) {
+    fun show(text: String, onTap: ((Context) -> Unit)?, onFinished: () -> Unit) {
         line = text
+        tapCallback = onTap
         finishCallback = onFinished
         offset = 0f
         lastFrame = SystemClock.uptimeMillis()
         contentDescription = text
+        isClickable = onTap != null
+        if (onTap == null) {
+            setOnClickListener(null)
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        } else {
+            setOnClickListener { onTap(context) }
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        }
         start()
         invalidate()
     }

@@ -1,8 +1,10 @@
 package app.ticker
 
+import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.usage.UsageEvents
 import android.app.usage.UsageStatsManager
 import android.content.BroadcastReceiver
@@ -316,7 +318,14 @@ internal class TickerController(private val app: Context) {
             took = true
         }
         if (!took) return
-        showOnRibbon(Line(line, preview = false, packageName = pkg)) {
+        showOnRibbon(
+            Line(
+                line,
+                preview = false,
+                packageName = pkg,
+                contentIntent = notification.contentIntent
+            )
+        ) {
             dismissAlert(pkg, notification, sbn.key)
         }
     }
@@ -733,7 +742,11 @@ internal class TickerController(private val app: Context) {
                 }
                 return
             }
-            val shown = overlay.show(next.text, currentAppearance()) { main.post { onLineFinished() } }
+            val shown = overlay.show(
+                next.text,
+                currentAppearance(),
+                tapFor(next)
+            ) { main.post { onLineFinished() } }
             if (!shown) {
                 if (!next.blockLogged && !next.preview) {
                     next.blockLogged = true
@@ -751,6 +764,74 @@ internal class TickerController(private val app: Context) {
     private fun onLineFinished() {
         showing = null
         showNext()
+    }
+
+    private fun tapFor(line: Line): ((Context) -> Unit)? {
+        if (line.preview) return null
+        if (line.packageName.isNullOrEmpty() && line.contentIntent == null) return null
+        return { context -> openSender(context, line) }
+    }
+
+    /**
+     * The shade entry is already gone, so the tap cannot be a shade click.
+     * The notification's own content intent still fires without that entry.
+     * If it is missing or cancelled, open the app's launcher activity.
+     */
+    private fun openSender(context: Context, line: Line) {
+        val pkg = line.packageName
+        val pending = line.contentIntent
+        if (pending != null && pending.opensActivity() && sendContentIntent(context, pending)) {
+            note("open pkg=${pkg ?: "-"} ${contextLine()} reason=content-intent")
+            return
+        }
+        if (pkg != null && openLauncher(context, pkg)) {
+            note("open pkg=$pkg ${contextLine()} reason=launcher")
+            return
+        }
+        note("open failed pkg=${pkg ?: "-"} ${contextLine()} reason=no-launcher")
+    }
+
+    private fun PendingIntent.opensActivity(): Boolean {
+        if (Build.VERSION.SDK_INT >= 31) return isActivity
+        return true
+    }
+
+    private fun sendContentIntent(context: Context, pending: PendingIntent): Boolean {
+        return try {
+            pending.send(context, 0, null, null, null, null, backgroundStartOptions())
+            true
+        } catch (_: PendingIntent.CanceledException) {
+            false
+        }
+    }
+
+    private fun openLauncher(context: Context, packageName: String): Boolean {
+        val launch = context.packageManager.getLaunchIntentForPackage(packageName) ?: return false
+        launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return try {
+            context.startActivity(launch)
+            true
+        } catch (_: RuntimeException) {
+            false
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun backgroundStartOptions(): android.os.Bundle? {
+        val options = ActivityOptions.makeBasic()
+        if (Build.VERSION.SDK_INT >= 36) {
+            options.setPendingIntentBackgroundActivityStartMode(
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOW_IF_VISIBLE
+            )
+        } else if (Build.VERSION.SDK_INT >= 34) {
+            options.setPendingIntentBackgroundActivityStartMode(
+                ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED
+            )
+        } else if (Build.VERSION.SDK_INT >= 33) {
+            @Suppress("DEPRECATION")
+            options.setPendingIntentBackgroundActivityLaunchAllowed(true)
+        }
+        return options.toBundle()
     }
 
     private fun syncStripVisibility() {
@@ -957,7 +1038,8 @@ internal class TickerController(private val app: Context) {
     private class Line(
         val text: String,
         val preview: Boolean,
-        val packageName: String?
+        val packageName: String?,
+        val contentIntent: PendingIntent? = null
     ) {
         var blockLogged = false
     }
