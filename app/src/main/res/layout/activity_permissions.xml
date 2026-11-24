@@ -41,14 +41,11 @@
                 android:textColor="@color/ink"
                 android:textSize="16sp" />
 
-            <Spinner
-                android:id="@+id/theme_spinner"
+            <LinearLayout
+                android:id="@+id/theme_rows"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="48dp"
-                android:paddingStart="12dp"
-                android:paddingEnd="12dp"
-                android:spinnerMode="dropdown" />
+                android:orientation="vertical" />
 
             <LinearLayout
                 android:id="@+id/permission_rows"

@@ -37,6 +37,7 @@
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
     <string name="theme_system">Follow system settings</string>
+    <string name="choice_on">On</string>
     <string name="text_size_label">Text size</string>
     <string name="scroll_speed_label">Scroll speed</string>
     <string name="step_xs">xs</string>

@@ -12,7 +12,9 @@ import android.content.ComponentCallbacks
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.net.Uri
 import android.hardware.display.DisplayManager
 import android.os.Build
 import android.os.Handler
@@ -54,12 +56,26 @@ internal class TickerController(private val app: Context) {
     private var currentForeground: String? = null
 
     /**
+     * Last selected app that was still resumed. A poll that finds nobody in
+     * front is a lost read, so this stays armed. A browser or launcher on top
+     * does not clear it while that app is still resumed, and a brief flicker
+     * of those apps does not count as leaving.
+     */
+    private var heldSelected: String? = null
+    private var passingSince = Long.MAX_VALUE
+
+    /**
      * Activities resumed and not yet paused. Kept across polls. Scrolling does
      * not emit a usage event, and One UI can omit the original resume from a
      * later query, so a poll with no new event must not clear this.
+     * [pausedAt] is the latest pause or stop for that activity. A resume at or
+     * before that time is already paused and must not become foreground.
      */
     private val usageLock = Any()
     private val resumed = LinkedHashMap<String, OpenActivity>()
+    private val pausedAt = HashMap<String, Long>()
+    private val passingLock = Any()
+    private var passingPackages: Set<String>? = null
     private var usageCursor = Long.MIN_VALUE
     private var usageCursorCount = 0
     private var usageCoveredFrom = Long.MAX_VALUE
@@ -118,6 +134,8 @@ internal class TickerController(private val app: Context) {
         prefs.masterEnabled = enabled
         if (!enabled) {
             armed = false
+            heldSelected = null
+            passingSince = Long.MAX_VALUE
             closeArrivalGate()
             clearStrip()
         }
@@ -197,6 +215,8 @@ internal class TickerController(private val app: Context) {
 
     fun onListenerConnected() {
         forgetUsage()
+        heldSelected = null
+        passingSince = Long.MAX_VALUE
         listenerConnected = true
         armed = false
         closeArrivalGate()
@@ -207,6 +227,8 @@ internal class TickerController(private val app: Context) {
     fun onListenerDisconnected() {
         listenerConnected = false
         forgetUsage()
+        heldSelected = null
+        passingSince = Long.MAX_VALUE
         stopPolling()
         armed = false
         closeArrivalGate()
@@ -437,7 +459,7 @@ internal class TickerController(private val app: Context) {
                 if (prefs.masterEnabled && !Grants.core(app)) {
                     setMasterEnabled(false)
                 }
-                if (read is ForegroundRead.Known) applyForeground(read.packageName)
+                if (read is ForegroundRead.Known) onUsageForeground(read.packageName)
                 syncStripVisibility()
             }
             pollHandler?.postDelayed(this, POLL_MS)
@@ -453,6 +475,7 @@ internal class TickerController(private val app: Context) {
         if (!Grants.usage(app)) {
             synchronized(usageLock) {
                 resumed.clear()
+                pausedAt.clear()
                 usageReady = false
                 usageCursor = Long.MIN_VALUE
                 usageCursorCount = 0
@@ -494,11 +517,11 @@ internal class TickerController(private val app: Context) {
             val chunk = queryEvents(chunkStart, rangeStart) ?: return rememberUsageFailure()
             chunks.addFirst(chunk)
             val open = LinkedHashMap<String, OpenActivity>()
+            val paused = HashMap<String, Long>()
             var cursor = Long.MIN_VALUE
             var count = 0
             for (events in chunks) {
                 for (event in events) {
-                    applyUsage(event, open)
                     if (event.time == cursor) {
                         count += 1
                     } else {
@@ -506,15 +529,18 @@ internal class TickerController(private val app: Context) {
                         count = 1
                     }
                 }
+                for (event in chronological(events)) {
+                    applyUsage(event, open, paused)
+                }
             }
             if (open.isNotEmpty() || chunkStart <= earliest) {
                 val cursorTime = if (cursor == Long.MIN_VALUE) end else cursor
                 val cursorCount = if (cursor == Long.MIN_VALUE) 0 else count
-                if (!commitUsage(generation, open, cursorTime, cursorCount, chunkStart)) {
+                if (!commitUsage(generation, open, paused, cursorTime, cursorCount, chunkStart)) {
                     return ForegroundRead.Unavailable
                 }
                 usageWarned = false
-                return ForegroundRead.Known(open.values.maxByOrNull { it.time }?.packageName)
+                return ForegroundRead.Known(foregroundPackage(open))
             }
             rangeStart = chunkStart
         }
@@ -525,17 +551,20 @@ internal class TickerController(private val app: Context) {
         val count: Int
         val covered: Long
         val open: LinkedHashMap<String, OpenActivity>
+        val paused: HashMap<String, Long>
         synchronized(usageLock) {
             if (generation != usageGeneration || !usageReady) return ForegroundRead.Unavailable
             cursor = usageCursor
             count = usageCursorCount
             covered = usageCoveredFrom
             open = LinkedHashMap(resumed)
+            paused = HashMap(pausedAt)
         }
         val events = queryEvents(cursor.coerceAtLeast(0L), end) ?: return rememberUsageFailure()
         var seenAtCursor = 0
         var newCursor = cursor
         var newCount = count
+        val fresh = ArrayList<ActivityEvent>()
         for (event in events) {
             if (event.time < cursor) continue
             if (event.time == cursor) {
@@ -544,44 +573,169 @@ internal class TickerController(private val app: Context) {
             } else {
                 seenAtCursor = 1
             }
-            applyUsage(event, open)
+            fresh.add(event)
             newCursor = event.time
             newCount = seenAtCursor
+        }
+        for (event in chronological(fresh)) {
+            applyUsage(event, open, paused)
         }
         if (open.isEmpty() && covered > lookbackStart(end)) {
             // A pause closed the activity we had. Do not commit that empty
             // set over history we have not loaded yet.
             return ForegroundRead.Known(null)
         }
-        if (!commitUsage(generation, open, newCursor, newCount, covered)) {
+        if (!commitUsage(generation, open, paused, newCursor, newCount, covered)) {
             return ForegroundRead.Unavailable
         }
         usageWarned = false
-        return ForegroundRead.Known(open.values.maxByOrNull { it.time }?.packageName)
+        return ForegroundRead.Known(foregroundPackage(open))
     }
 
-    private fun applyUsage(event: ActivityEvent, open: MutableMap<String, OpenActivity>) {
+    private fun applyUsage(
+        event: ActivityEvent,
+        open: MutableMap<String, OpenActivity>,
+        paused: MutableMap<String, Long>
+    ) {
         when (event.type) {
             UsageEvents.Event.ACTIVITY_RESUMED -> {
-                val key = if (event.className.isEmpty()) {
-                    event.packageName
-                } else {
-                    "${event.packageName}/${event.className}"
-                }
+                val key = activityKey(event.packageName, event.className)
+                if (alreadyPaused(event, paused)) return
+                paused.remove(key)
                 open[key] = OpenActivity(event.packageName, event.time)
             }
             UsageEvents.Event.ACTIVITY_PAUSED,
             UsageEvents.Event.ACTIVITY_STOPPED -> {
                 if (event.className.isEmpty()) {
+                    val mark = maxOf(paused[event.packageName] ?: 0L, event.time)
+                    paused[event.packageName] = mark
                     val iterator = open.entries.iterator()
                     while (iterator.hasNext()) {
-                        if (iterator.next().value.packageName == event.packageName) iterator.remove()
+                        val entry = iterator.next()
+                        if (entry.value.packageName != event.packageName) continue
+                        if (event.time < entry.value.time) continue
+                        paused[entry.key] = event.time
+                        iterator.remove()
                     }
                 } else {
-                    open.remove("${event.packageName}/${event.className}")
+                    val key = activityKey(event.packageName, event.className)
+                    val existing = open[key]
+                    if (existing != null && event.time < existing.time) return
+                    paused[key] = event.time
+                    open.remove(key)
                 }
             }
         }
+    }
+
+    /**
+     * A resume that shows up after the activity was already paused, at or
+     * before that pause, is a fold replay. It must not become foreground.
+     */
+    private fun alreadyPaused(event: ActivityEvent, paused: Map<String, Long>): Boolean {
+        val key = activityKey(event.packageName, event.className)
+        val atKey = paused[key]
+        if (atKey != null && event.time <= atKey) return true
+        val atPackage = paused[event.packageName]
+        return atPackage != null && event.time <= atPackage
+    }
+
+    private fun activityKey(packageName: String, className: String): String {
+        return if (className.isEmpty()) packageName else "$packageName/$className"
+    }
+
+    private fun chronological(events: List<ActivityEvent>): List<ActivityEvent> {
+        if (events.size < 2) return events
+        return events.sortedWith(
+            compareBy<ActivityEvent> { it.time }.thenBy { resumeRank(it.type) }
+        )
+    }
+
+    private fun resumeRank(type: Int): Int {
+        return if (type == UsageEvents.Event.ACTIVITY_RESUMED) 1 else 0
+    }
+
+    /**
+     * Newest still-resumed activity. A browser or launcher does not take the
+     * foreground while a selected app is still resumed.
+     */
+    private fun foregroundPackage(open: Map<String, OpenActivity>): String? {
+        val newest = open.values.maxByOrNull { it.time } ?: return null
+        val selected = prefs.selectedPackages
+        val own = app.packageName
+        val selectedStill = open.values
+            .filter { it.packageName != own && it.packageName in selected }
+            .maxByOrNull { it.time }
+        if (
+            selectedStill != null &&
+            selectedStill.packageName != newest.packageName &&
+            isPassingApp(newest.packageName)
+        ) {
+            return selectedStill.packageName
+        }
+        return newest.packageName
+    }
+
+    private fun onUsageForeground(raw: String?) {
+        val selected = prefs.selectedPackages
+        val own = app.packageName
+        if (heldSelected != null && (heldSelected !in selected || heldSelected == own)) {
+            heldSelected = null
+        }
+        val rawSelected = raw != null && raw != own && raw in selected
+        val passing = raw != null && !rawSelected && isPassingApp(raw)
+        val now = SystemClock.elapsedRealtime()
+        if (passing && heldSelected != null) {
+            if (passingSince == Long.MAX_VALUE) passingSince = now
+        } else {
+            passingSince = Long.MAX_VALUE
+        }
+        val passingHeld = passing &&
+            heldSelected != null &&
+            now - passingSince < PASSING_GRACE_MS
+        val chosen = when {
+            rawSelected -> raw
+            raw == null -> heldSelected
+            passingHeld -> heldSelected
+            else -> raw
+        }
+        applyForeground(chosen)
+        when {
+            rawSelected -> heldSelected = raw
+            raw == null || passingHeld -> Unit
+            else -> heldSelected = null
+        }
+    }
+
+    private fun isPassingApp(packageName: String): Boolean {
+        synchronized(passingLock) {
+            val known = passingPackages ?: resolvePassingPackages().also { passingPackages = it }
+            return packageName in known
+        }
+    }
+
+    private fun resolvePassingPackages(): Set<String> {
+        val names = HashSet<String>()
+        val pm = app.packageManager
+        try {
+            val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            for (info in pm.queryIntentActivities(home, 0)) {
+                names.add(info.activityInfo.packageName)
+            }
+        } catch (_: RuntimeException) {
+            // A launcher query failure leaves the role holder, if any.
+        }
+        try {
+            val browse = Intent(Intent.ACTION_VIEW, Uri.parse("https://localhost"))
+                .addCategory(Intent.CATEGORY_BROWSABLE)
+            for (info in pm.queryIntentActivities(browse, PackageManager.MATCH_ALL)) {
+                names.add(info.activityInfo.packageName)
+            }
+        } catch (_: RuntimeException) {
+            // A browser query failure leaves the role holder, if any.
+        }
+        names.remove(app.packageName)
+        return names
     }
 
     private fun queryEvents(start: Long, end: Long): List<ActivityEvent>? {
@@ -653,6 +807,7 @@ internal class TickerController(private val app: Context) {
     private fun commitUsage(
         generation: Int,
         open: Map<String, OpenActivity>,
+        paused: Map<String, Long>,
         cursor: Long,
         cursorCount: Int,
         coveredFrom: Long
@@ -661,6 +816,8 @@ internal class TickerController(private val app: Context) {
             if (generation != usageGeneration) return false
             resumed.clear()
             resumed.putAll(open)
+            pausedAt.clear()
+            pausedAt.putAll(paused)
             usageCursor = cursor
             usageCursorCount = cursorCount
             usageCoveredFrom = coveredFrom
@@ -680,6 +837,7 @@ internal class TickerController(private val app: Context) {
     private fun forgetUsage() {
         synchronized(usageLock) {
             resumed.clear()
+            pausedAt.clear()
             usageReady = false
             usageCursor = Long.MIN_VALUE
             usageCursorCount = 0
@@ -1088,5 +1246,6 @@ internal class TickerController(private val app: Context) {
         const val USAGE_CHUNK_MS = 30L * 60L * 1000L
         const val USAGE_PAGE_CAP = 250
         const val USAGE_MIN_SPAN_MS = 60_000L
+        const val PASSING_GRACE_MS = 8_000L
     }
 }

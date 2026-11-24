@@ -3,11 +3,8 @@ package app.ticker
 import android.content.Context
 import android.os.Bundle
 import android.view.View
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.LinearLayout
-import android.widget.Spinner
 import android.widget.TextView
 
 class PermissionsActivity : android.app.Activity() {
@@ -16,7 +13,9 @@ class PermissionsActivity : android.app.Activity() {
 
     private lateinit var debugLog: TextView
     private val states = ArrayList<TextView>()
-    private var rendering = false
+    private val themeTitles = ArrayList<TextView>()
+    private val themeStates = ArrayList<TextView>()
+    private val themeValues = intArrayOf(AppTheme.LIGHT, AppTheme.DARK, AppTheme.SYSTEM)
 
     private val listener = TickerController.Listener { render() }
 
@@ -70,30 +69,34 @@ class PermissionsActivity : android.app.Activity() {
     }
 
     private fun bindTheme() {
-        val labels = arrayOf(
-            getString(R.string.theme_light),
-            getString(R.string.theme_dark),
-            getString(R.string.theme_system)
-        )
-        val values = intArrayOf(AppTheme.LIGHT, AppTheme.DARK, AppTheme.SYSTEM)
-        val spinner = findViewById<Spinner>(R.id.theme_spinner)
-        val choices = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels)
-        choices.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        spinner.adapter = choices
-        rendering = true
-        val current = values.indexOf(TickerPrefs(this).appTheme).coerceAtLeast(0)
-        spinner.setSelection(current)
-        rendering = false
-        spinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>, view: View?, position: Int, id: Long) {
-                if (rendering) return
-                val next = values[position]
-                if (TickerPrefs(this@PermissionsActivity).appTheme == next) return
-                TickerPrefs(this@PermissionsActivity).appTheme = next
+        val labels = intArrayOf(R.string.theme_light, R.string.theme_dark, R.string.theme_system)
+        val container = findViewById<LinearLayout>(R.id.theme_rows)
+        val inflater = layoutInflater
+        for (index in labels.indices) {
+            val view = inflater.inflate(R.layout.row_choice, container, false)
+            val title = view.findViewById<TextView>(R.id.choice_title)
+            val state = view.findViewById<TextView>(R.id.choice_state)
+            title.setText(labels[index])
+            val value = themeValues[index]
+            view.findViewById<View>(R.id.choice_row).setOnClickListener {
+                if (TickerPrefs(this).appTheme == value) return@setOnClickListener
+                TickerPrefs(this).appTheme = value
                 recreate()
             }
+            themeTitles.add(title)
+            themeStates.add(state)
+            container.addView(view)
+        }
+        paintTheme()
+    }
 
-            override fun onNothingSelected(parent: AdapterView<*>) = Unit
+    private fun paintTheme() {
+        val selected = TickerPrefs(this).appTheme
+        for (index in themeValues.indices) {
+            val on = themeValues[index] == selected
+            themeTitles[index].setTextColor(getColor(if (on) R.color.accent else R.color.ink))
+            themeStates[index].text = if (on) getString(R.string.choice_on) else ""
+            themeStates[index].setTextColor(getColor(R.color.accent))
         }
     }
 
@@ -109,6 +112,7 @@ class PermissionsActivity : android.app.Activity() {
             states[index].setTextColor(getColor(if (ok) R.color.accent else R.color.missing))
         }
         debugLog.text = DecisionLog.recent(this, 12) ?: getString(R.string.debug_empty)
+        paintTheme()
     }
 
     private data class Perm(
