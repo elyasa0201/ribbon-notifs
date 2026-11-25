@@ -38,15 +38,12 @@ import java.util.ArrayDeque
  * off it. A low-importance alert that is not minimized still scrolls. The
  * shade entry stays until the user opens it. Do Not Disturb stays off.
  *
- * A heads-up is that shade row shown again as a popup. SystemUI keeps the
- * popup only while the channel ranks at high importance. Default importance
- * still plays the sound and keeps the shade row, and the ranking update
- * takes the popup down. The listener write for that drop is
- * [android.service.notification.NotificationListenerService.updateNotificationChannel].
- * The platform allows it for a companion listener or the notification
- * assistant, and rejects it otherwise. A rejected write leaves the popup
- * up, and the alert still scrolls. The importance we found is put back
- * when the chosen app is no longer in front.
+ * A heads-up is that shade row shown again as a popup. A channel write can
+ * stop later popups when the platform allows it. It does not take down a
+ * popup that is already on screen, and a normal listener is rejected. Opening
+ * the notification shade marks that popup seen, SystemUI removes it, and the
+ * shade entry stays. The shade is closed again once the popup has been taken
+ * in.
  *
  * Failure handling lives here: a missing grant, a null usage result before the
  * first unlock after boot, and listener disconnect.
@@ -363,6 +360,9 @@ internal class TickerController(private val app: Context) {
             took = true
         }
         if (!took) return
+        val headsUp = (ranked && ranking.importance >= NotificationManager.IMPORTANCE_HIGH) ||
+            (channelImportance != null && channelImportance >= NotificationManager.IMPORTANCE_HIGH)
+        if (headsUp) HeadsUpShade.hide()?.let { note("$it pkg=$pkg") }
         quietHeadsUp?.invoke(sbn, channel)?.let { note(it) }
         showOnRibbon(
             Line(

@@ -18,6 +18,9 @@
     <string name="perm_overlay_why">Draws the thin strip. The strip does not take taps, so the app underneath still receives every touch.</string>
     <string name="perm_usage">Usage access</string>
     <string name="perm_usage_why">Sees which app is in front so Ribbon Notifs can turn on by itself. Without this, nothing arms automatically.</string>
+    <string name="perm_shade">Shade access</string>
+    <string name="perm_shade_why">Clears a heads-up that is already on screen. The notification shade opens for a moment and then closes, and the notification stays in the shade. A sideloaded install needs Allow restricted settings before this can be turned on.</string>
+    <string name="shade_pulse_description">Opens the notification shade briefly so a heads-up can leave the screen. The notification stays in the shade.</string>
 
     <string name="state_granted">Granted</string>
     <string name="state_missing">Missing</string>

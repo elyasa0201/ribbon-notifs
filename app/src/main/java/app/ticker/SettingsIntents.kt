@@ -2,6 +2,7 @@ package app.ticker
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -21,6 +22,17 @@ internal fun openOverlayAccess(activity: Activity) {
 
 internal fun openUsageAccess(activity: Activity) {
     open(activity, Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+}
+
+internal fun openShadeAccess(activity: Activity) {
+    val component = ComponentName(activity, ShadePulseService::class.java)
+    val details = Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
+        .putExtra(Intent.EXTRA_COMPONENT_NAME, component.flattenToString())
+    try {
+        activity.startActivity(details)
+    } catch (_: ActivityNotFoundException) {
+        open(activity, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+    }
 }
 
 private fun open(activity: Activity, intent: Intent) {
