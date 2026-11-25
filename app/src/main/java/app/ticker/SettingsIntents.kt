@@ -2,7 +2,6 @@ package app.ticker
 
 import android.app.Activity
 import android.content.ActivityNotFoundException
-import android.content.ComponentName
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
@@ -25,20 +24,18 @@ internal fun openUsageAccess(activity: Activity) {
 }
 
 internal fun openShadeAccess(activity: Activity) {
-    val component = ComponentName(activity, ShadePulseService::class.java)
-    val details = Intent("android.settings.ACCESSIBILITY_DETAILS_SETTINGS")
-        .putExtra(Intent.EXTRA_COMPONENT_NAME, component.flattenToString())
-    try {
-        activity.startActivity(details)
-    } catch (_: ActivityNotFoundException) {
-        open(activity, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-    }
+    // The detail screen is a hidden system intent. One UI finds it and then
+    // throws SecurityException, which closed App Settings. The public list
+    // is the screen that holds the Shade access toggle.
+    open(activity, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
 }
 
 private fun open(activity: Activity, intent: Intent) {
     try {
         activity.startActivity(intent)
     } catch (_: ActivityNotFoundException) {
+        Toast.makeText(activity, R.string.settings_unavailable, Toast.LENGTH_LONG).show()
+    } catch (_: SecurityException) {
         Toast.makeText(activity, R.string.settings_unavailable, Toast.LENGTH_LONG).show()
     }
 }

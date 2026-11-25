@@ -17,11 +17,6 @@ class ShadePulseService : AccessibilityService() {
         active = this
     }
 
-    override fun onUnbind(intent: android.content.Intent?): Boolean {
-        if (active === this) active = null
-        return super.onUnbind(intent)
-    }
-
     override fun onDestroy() {
         if (active === this) active = null
         main.removeCallbacksAndMessages(null)
