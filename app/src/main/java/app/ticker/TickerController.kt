@@ -31,10 +31,10 @@ import android.util.Log
 import java.util.ArrayDeque
 
 /**
- * While a chosen app is in front, ordinary alerts go on the strip and are then
- * cancelled so the heads-up cannot stay up. Cancelling removes the shade entry
- * too; that is the public dismiss call. Calls, alarms, ongoing events, and
- * media are left in place. Do Not Disturb is never turned on.
+ * While a chosen app is in front, ordinary alerts go on the strip. The shade
+ * entry stays until the user opens it. Cancelling would swipe that entry away,
+ * and no public listener call hides only the heads-up. Calls, alarms, ongoing
+ * events, and media are left in place. Do Not Disturb is never turned on.
  *
  * Failure handling lives here: a missing grant, a null usage result before the
  * first unlock after boot, and listener disconnect.
@@ -95,9 +95,6 @@ internal class TickerController(private val app: Context) {
 
     /** Active shade, read from the connected listener. Used once each time we arm. */
     internal var activeNotifications: (() -> List<StatusBarNotification>)? = null
-
-    /** Removes one posted notification. Returns false when the listener call fails. */
-    internal var dismissNotification: ((String) -> Boolean)? = null
 
     val masterEnabled: Boolean get() = prefs.masterEnabled
     fun isSelected(packageName: String): Boolean = packageName in prefs.selectedPackages
@@ -320,7 +317,6 @@ internal class TickerController(private val app: Context) {
         )
         if (synchronized(postedLock) { isDuplicate(posted) }) {
             skip("duplicate")
-            dismissAlert(pkg, notification, sbn.key)
             return
         }
         val channel = channelImportance ?: -1
@@ -349,46 +345,16 @@ internal class TickerController(private val app: Context) {
                 packageName = pkg,
                 contentIntent = notification.contentIntent
             )
-        ) {
-            dismissAlert(pkg, notification, sbn.key)
-        }
+        )
     }
 
-    private fun showOnRibbon(line: Line, afterQueued: () -> Unit) {
+    private fun showOnRibbon(line: Line) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            main.post { showOnRibbon(line, afterQueued) }
+            main.post { showOnRibbon(line) }
             return
         }
         queue.addLast(line)
         if (showing == null) showNext()
-        afterQueued()
-    }
-
-    private fun dismissAlert(pkg: String, notification: Notification, key: String) {
-        if (keepsSystemAlert(notification)) return
-        val dismiss = dismissNotification
-        if (dismiss == null) {
-            note("dismiss failed pkg=$pkg ${contextLine()} reason=no-listener")
-            return
-        }
-        val removed = try {
-            dismiss(key)
-        } catch (_: RuntimeException) {
-            false
-        }
-        if (removed) {
-            note("dismiss pkg=$pkg ${contextLine()} reason=cancel")
-        } else {
-            note("dismiss failed pkg=$pkg ${contextLine()} reason=cancel")
-        }
-    }
-
-    private fun keepsSystemAlert(notification: Notification): Boolean {
-        val category = notification.category
-        if (category == Notification.CATEGORY_CALL) return true
-        if (category == Notification.CATEGORY_ALARM) return true
-        if (notification.fullScreenIntent != null) return true
-        return false
     }
 
     private fun registerReceivers() {
