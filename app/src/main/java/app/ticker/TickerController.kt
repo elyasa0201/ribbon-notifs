@@ -34,8 +34,9 @@ import java.util.ArrayDeque
 /**
  * While a chosen app is in front, alerts go on the strip. Persistent
  * notifications, media, Maps, calls (including a full-screen call), alarms,
- * and group summaries stay off it. The shade entry stays until the user
- * opens it. Do Not Disturb stays off.
+ * group summaries, background activities, and minimized notifications stay
+ * off it. A low-importance alert that is not minimized still scrolls. The
+ * shade entry stays until the user opens it. Do Not Disturb stays off.
  *
  * A heads-up is that shade row shown again as a popup. SystemUI keeps the
  * popup only while the channel ranks at high importance. Default importance
@@ -95,6 +96,11 @@ internal class TickerController(private val app: Context) {
     @Volatile private var usageGeneration = 0
     private var showing: Line? = null
     private var usageWarned = false
+    private val probeLock = Any()
+    private val behaviorProbed = HashSet<Class<*>>()
+    private val behaviorMethodCache = HashMap<Class<*>, java.lang.reflect.Method>()
+    private val minimizedProbed = HashSet<Class<*>>()
+    private val minimizedMethodCache = HashMap<Class<*>, java.lang.reflect.Method>()
     private var pollThread: HandlerThread? = null
     private var pollHandler: Handler? = null
     private val shownUpdateKeys = ArrayDeque<String>()
@@ -300,6 +306,10 @@ internal class TickerController(private val app: Context) {
             skip("media")
             return
         }
+        if (isBackgroundActivity(notification)) {
+            skip("background")
+            return
+        }
         val text = noticeText(notification)
         val arrival = synchronized(postedLock) { arrivalOf(sbn.key, text, sbn.postTime) }
         if (arrival == Arrival.Replay) {
@@ -318,6 +328,10 @@ internal class TickerController(private val app: Context) {
         }
         val channel = if (ranked) ranking.channel else null
         val channelImportance = channel?.importance
+        if (isMinimized(notification, ranked, ranking, channel)) {
+            skip("minimized")
+            return
+        }
         val peek = ranked && (ranking.suppressedVisualEffects and
             NotificationManager.Policy.SUPPRESSED_EFFECT_PEEK) != 0
         val line = TickerText.line(appLabel(pkg), text.title, text.body)
@@ -1147,6 +1161,100 @@ internal class TickerController(private val app: Context) {
             messages.add(ChatMessage(text, bundle.getLong("time")))
         }
         return messages
+    }
+
+    /**
+     * One UI's background-activity row is the service notification an app
+     * posts so it can keep running. A deferred foreground-service notification
+     * is that same row.
+     */
+    private fun isBackgroundActivity(notification: Notification): Boolean {
+        if (notification.category == Notification.CATEGORY_SERVICE) return true
+        val behavior = foregroundServiceBehavior(notification) ?: return false
+        return behavior == Notification.FOREGROUND_SERVICE_DEFERRED
+    }
+
+    /**
+     * Minimized notifications sit below low importance, or carry One UI's
+     * minimize mark. Low importance itself still scrolls.
+     */
+    private fun isMinimized(
+        notification: Notification,
+        ranked: Boolean,
+        ranking: Ranking,
+        channel: NotificationChannel?
+    ): Boolean {
+        val rankedImportance = ranked &&
+            ranking.importance != NotificationManager.IMPORTANCE_UNSPECIFIED
+        if (rankedImportance && belowLow(ranking.importance)) return true
+        if (rankedImportance && ranking.isAmbient) return true
+        if (!rankedImportance && channel != null && belowLow(channel.importance)) return true
+        if (channel != null && marksMinimized(channel)) return true
+        return marksMinimized(notification) || extrasMarkMinimized(notification)
+    }
+
+    private fun belowLow(importance: Int): Boolean {
+        return importance != NotificationManager.IMPORTANCE_UNSPECIFIED &&
+            importance < NotificationManager.IMPORTANCE_LOW
+    }
+
+    private fun foregroundServiceBehavior(notification: Notification): Int? {
+        val method = behaviorMethod(notification.javaClass) ?: return null
+        val value = try {
+            method.invoke(notification)
+        } catch (_: Throwable) {
+            null
+        }
+        return value as? Int
+    }
+
+    private fun behaviorMethod(type: Class<*>): java.lang.reflect.Method? {
+        synchronized(probeLock) {
+            if (behaviorProbed.contains(type)) return behaviorMethodCache[type]
+            behaviorProbed.add(type)
+            val found = try {
+                type.getMethod("getForegroundServiceBehavior")
+            } catch (_: Throwable) {
+                null
+            }
+            if (found != null) behaviorMethodCache[type] = found
+            return found
+        }
+    }
+
+    private fun marksMinimized(target: Any): Boolean {
+        val method = minimizedMethod(target.javaClass) ?: return false
+        val value = try {
+            method.invoke(target)
+        } catch (_: Throwable) {
+            null
+        }
+        return value == true
+    }
+
+    private fun minimizedMethod(type: Class<*>): java.lang.reflect.Method? {
+        synchronized(probeLock) {
+            if (minimizedProbed.contains(type)) return minimizedMethodCache[type]
+            minimizedProbed.add(type)
+            val found = type.methods.firstOrNull { method ->
+                method.parameterCount == 0 &&
+                    (method.returnType == java.lang.Boolean.TYPE ||
+                        method.returnType == java.lang.Boolean::class.java) &&
+                    method.name.contains("minimi", ignoreCase = true)
+            }
+            if (found != null) minimizedMethodCache[type] = found
+            return found
+        }
+    }
+
+    private fun extrasMarkMinimized(notification: Notification): Boolean {
+        val extras = notification.extras ?: return false
+        for (key in extras.keySet()) {
+            if (key.isNullOrEmpty() || !key.contains("minimi", ignoreCase = true)) continue
+            if (extras.getBoolean(key, false)) return true
+            if (extras.getInt(key, 0) == 1) return true
+        }
+        return false
     }
 
     private fun isPersistent(notification: Notification): Boolean {
