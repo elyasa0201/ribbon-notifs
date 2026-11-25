@@ -68,9 +68,9 @@ internal class TickerController(private val app: Context) {
 
     /**
      * Last selected app that was still resumed. A poll that finds nobody in
-     * front is a lost read, so this stays armed. A browser or launcher on top
-     * does not clear it while that app is still resumed, and a brief flicker
-     * of those apps does not count as leaving.
+     * front is a lost read, so this stays armed. Another resumed app beside
+     * it, including the other pane of split view, does not clear it. A brief
+     * browser or launcher flicker does not count as leaving.
      */
     private var heldSelected: String? = null
     private var passingSince = Long.MAX_VALUE
@@ -483,8 +483,11 @@ internal class TickerController(private val app: Context) {
 
     /**
      * Reads usage history in short slices from [end] back to [earliest],
-     * newest first, and stops once a still-resumed activity is found.
-     * The open set is kept in memory; later polls only add newer events.
+     * newest first. Split view resumes two apps at once, so a newer pane
+     * must not hide an older selected app that is still resumed. The walk
+     * stops once a selected app is in the open set, or the window is
+     * exhausted. The open set is kept in memory; later polls only add
+     * newer events.
      */
     private fun loadUsage(end: Long, generation: Int, earliest: Long): ForegroundRead {
         val chunks = ArrayDeque<List<ActivityEvent>>()
@@ -511,7 +514,14 @@ internal class TickerController(private val app: Context) {
                     applyUsage(event, open, paused)
                 }
             }
-            if (open.isNotEmpty() || chunkStart <= earliest) {
+            val selectedStillOpen = open.values.any { activity ->
+                activity.packageName != app.packageName &&
+                    activity.packageName in prefs.selectedPackages
+            }
+            val finished = chunkStart <= earliest ||
+                selectedStillOpen ||
+                (open.isNotEmpty() && prefs.selectedPackages.isEmpty())
+            if (finished) {
                 val cursorTime = if (cursor == Long.MIN_VALUE) end else cursor
                 val cursorCount = if (cursor == Long.MIN_VALUE) 0 else count
                 if (!commitUsage(generation, open, paused, cursorTime, cursorCount, chunkStart)) {
@@ -634,24 +644,19 @@ internal class TickerController(private val app: Context) {
     }
 
     /**
-     * Newest still-resumed activity. A browser or launcher does not take the
-     * foreground while a selected app is still resumed.
+     * A selected app that is still resumed stays the foreground. The other
+     * resumed app in split view does not take its place. With no selected
+     * app resumed, the newest resumed activity wins.
      */
     private fun foregroundPackage(open: Map<String, OpenActivity>): String? {
-        val newest = open.values.maxByOrNull { it.time } ?: return null
+        if (open.isEmpty()) return null
         val selected = prefs.selectedPackages
         val own = app.packageName
         val selectedStill = open.values
             .filter { it.packageName != own && it.packageName in selected }
             .maxByOrNull { it.time }
-        if (
-            selectedStill != null &&
-            selectedStill.packageName != newest.packageName &&
-            isPassingApp(newest.packageName)
-        ) {
-            return selectedStill.packageName
-        }
-        return newest.packageName
+        if (selectedStill != null) return selectedStill.packageName
+        return open.values.maxByOrNull { it.time }?.packageName
     }
 
     private fun onUsageForeground(raw: String?) {
