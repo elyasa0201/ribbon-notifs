@@ -3,6 +3,7 @@ package app.ticker
 import android.app.ActivityOptions
 import android.app.KeyguardManager
 import android.app.Notification
+import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.usage.UsageEvents
@@ -31,10 +32,20 @@ import android.util.Log
 import java.util.ArrayDeque
 
 /**
- * While a chosen app is in front, ordinary alerts go on the strip. The shade
- * entry stays until the user opens it. Cancelling would swipe that entry away,
- * and no public listener call hides only the heads-up. Calls, alarms, ongoing
- * events, and media are left in place. Do Not Disturb is never turned on.
+ * While a chosen app is in front, alerts go on the strip. Persistent
+ * notifications, media, Maps, calls (including a full-screen call), alarms,
+ * and group summaries stay off it. The shade entry stays until the user
+ * opens it. Do Not Disturb stays off.
+ *
+ * A heads-up is that shade row shown again as a popup. SystemUI keeps the
+ * popup only while the channel ranks at high importance. Default importance
+ * still plays the sound and keeps the shade row, and the ranking update
+ * takes the popup down. The listener write for that drop is
+ * [android.service.notification.NotificationListenerService.updateNotificationChannel].
+ * The platform allows it for a companion listener or the notification
+ * assistant, and rejects it otherwise. A rejected write leaves the popup
+ * up, and the alert still scrolls. The importance we found is put back
+ * when the chosen app is no longer in front.
  *
  * Failure handling lives here: a missing grant, a null usage result before the
  * first unlock after boot, and listener disconnect.
@@ -96,6 +107,16 @@ internal class TickerController(private val app: Context) {
     /** Active shade, read from the connected listener. Used once each time we arm. */
     internal var activeNotifications: (() -> List<StatusBarNotification>)? = null
 
+    /**
+     * Drops a high-importance channel to default so the popup goes away and
+     * the shade row stays. Returns a debug line, or null when there was
+     * nothing to change.
+     */
+    internal var quietHeadsUp: ((StatusBarNotification, NotificationChannel?) -> String?)? = null
+
+    /** Puts back channel importance lowered while a chosen app was in front. */
+    internal var restoreQuietChannels: (() -> List<String>)? = null
+
     val masterEnabled: Boolean get() = prefs.masterEnabled
     fun isSelected(packageName: String): Boolean = packageName in prefs.selectedPackages
 
@@ -135,6 +156,7 @@ internal class TickerController(private val app: Context) {
             passingSince = Long.MAX_VALUE
             closeArrivalGate()
             clearStrip()
+            restoreQuiet()
         }
         changed()
     }
@@ -252,24 +274,29 @@ internal class TickerController(private val app: Context) {
             skip("own-package")
             return
         }
-        if (pkg == currentForeground) {
-            skip("foreground-app")
+        if (pkg == MAPS_PACKAGE) {
+            skip("maps")
             return
         }
-        val flags = notification.flags
-        if ((flags and Notification.FLAG_ONGOING_EVENT) != 0) {
-            skip("ongoing")
+        if (notification.category == Notification.CATEGORY_ALARM) {
+            skip("alarm")
             return
         }
-        if ((flags and Notification.FLAG_FOREGROUND_SERVICE) != 0) {
-            skip("foreground-service")
+        if (notification.category == Notification.CATEGORY_CALL ||
+            notification.fullScreenIntent != null
+        ) {
+            skip("call")
             return
         }
-        if ((flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
+        if (isPersistent(notification)) {
+            skip("persistent")
+            return
+        }
+        if ((notification.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
             skip("group-summary")
             return
         }
-        if (isMediaStyle(notification)) {
+        if (isMedia(notification)) {
             skip("media")
             return
         }
@@ -283,31 +310,16 @@ internal class TickerController(private val app: Context) {
             skip("posted-before-arm")
             return
         }
-        // A conversation update is often ranked below high. So is a new message
-        // that only changes the text of a notification already in the shade.
-        val update = synchronized(postedLock) {
-            shownUpdateKeys.contains(sbn.key) || arrival == Arrival.TextChanged
-        }
         val ranking = Ranking()
         val ranked = try {
             rankingMap?.getRanking(sbn.key, ranking) == true
         } catch (_: RuntimeException) {
             false
         }
-        if (!ranked && !update) {
-            skip("no-ranking")
-            return
-        }
-        val channelImportance = if (ranked) ranking.channel?.importance else null
+        val channel = if (ranked) ranking.channel else null
+        val channelImportance = channel?.importance
         val peek = ranked && (ranking.suppressedVisualEffects and
             NotificationManager.Policy.SUPPRESSED_EFFECT_PEEK) != 0
-        val alerting = ranked && ordinaryAlert(ranking.importance, channelImportance, peek)
-        if (!alerting && !update) {
-            val channel = channelImportance ?: -1
-            val rank = if (ranked) ranking.importance else -1
-            skip("below-importance rank=$rank channel=$channel peek=$peek")
-            return
-        }
         val line = TickerText.line(appLabel(pkg), text.title, text.body)
         val posted = RibbonPost(
             key = sbn.key,
@@ -319,12 +331,11 @@ internal class TickerController(private val app: Context) {
             skip("duplicate")
             return
         }
-        val channel = channelImportance ?: -1
         val rank = if (ranked) ranking.importance else -1
-        val reason = if (update && !alerting) "update" else "shown"
+        val channelRank = channelImportance ?: -1
         note(
-            "accept pkg=$pkg ${contextLine()} reason=$reason " +
-                "rank=$rank channel=$channel peek=$peek"
+            "accept pkg=$pkg ${contextLine()} reason=shown " +
+                "rank=$rank channel=$channelRank peek=$peek"
         )
         var took = false
         synchronized(postedLock) {
@@ -338,6 +349,7 @@ internal class TickerController(private val app: Context) {
             took = true
         }
         if (!took) return
+        quietHeadsUp?.invoke(sbn, channel)?.let { note(it) }
         showOnRibbon(
             Line(
                 line,
@@ -837,6 +849,7 @@ internal class TickerController(private val app: Context) {
             closeArrivalGate()
             currentForeground = packageName
             dropAlertLines()
+            restoreQuiet()
             note("disarmed ${contextLine()} reason=left")
         } else {
             currentForeground = packageName
@@ -899,9 +912,11 @@ internal class TickerController(private val app: Context) {
     }
 
     /**
-     * The shade entry is already gone, so the tap cannot be a shade click.
-     * The notification's own content intent still fires without that entry.
-     * If it is missing or cancelled, open the app's launcher activity.
+     * The shade entry is still there. Sending the notification's content
+     * intent is the open the shade uses, and that open clears the entry when
+     * the notification dismisses on tap. If the intent is missing or is not
+     * an activity, open the sender's launcher. This leaves the shade entry
+     * for the system to clear.
      */
     private fun openSender(context: Context, line: Line) {
         val pkg = line.packageName
@@ -1129,9 +1144,21 @@ internal class TickerController(private val app: Context) {
         return messages
     }
 
-    private fun isMediaStyle(notification: Notification): Boolean {
+    private fun isPersistent(notification: Notification): Boolean {
+        val flags = notification.flags
+        return (flags and Notification.FLAG_ONGOING_EVENT) != 0 ||
+            (flags and Notification.FLAG_NO_CLEAR) != 0 ||
+            (flags and Notification.FLAG_FOREGROUND_SERVICE) != 0
+    }
+
+    private fun isMedia(notification: Notification): Boolean {
         val template = notification.extras?.getString(Notification.EXTRA_TEMPLATE) ?: return false
-        return template.endsWith("MediaStyle")
+        return template.contains("MediaStyle")
+    }
+
+    private fun restoreQuiet() {
+        val lines = restoreQuietChannels?.invoke().orEmpty()
+        for (line in lines) note(line)
     }
 
     private fun changed() {
@@ -1153,12 +1180,6 @@ internal class TickerController(private val app: Context) {
 
     private fun contextLine(): String {
         return "armed=$armed fg=${currentForeground ?: "-"} listener=$listenerConnected"
-    }
-
-    private fun ordinaryAlert(rank: Int, channel: Int?, peekSuppressed: Boolean): Boolean {
-        if (rank >= NotificationManager.IMPORTANCE_HIGH) return true
-        if (channel != null && channel >= NotificationManager.IMPORTANCE_HIGH) return true
-        return channel == null && peekSuppressed
     }
 
     private class Line(
@@ -1213,5 +1234,6 @@ internal class TickerController(private val app: Context) {
         const val USAGE_PAGE_CAP = 250
         const val USAGE_MIN_SPAN_MS = 60_000L
         const val PASSING_GRACE_MS = 8_000L
+        const val MAPS_PACKAGE = "com.google.android.apps.maps"
     }
 }

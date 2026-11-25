@@ -9,6 +9,8 @@ class TickerListenerService : NotificationListenerService() {
     private val controller: TickerController
         get() = (application as TickerApp).controller
 
+    private val headsUpQuiet = HeadsUpQuiet(this)
+
     override fun onListenerConnected() {
         controller.activeNotifications = {
             try {
@@ -17,13 +19,19 @@ class TickerListenerService : NotificationListenerService() {
                 emptyList()
             }
         }
+        controller.quietHeadsUp = { sbn, channel -> headsUpQuiet.quiet(sbn, channel) }
+        controller.restoreQuietChannels = { headsUpQuiet.restoreAll() }
+        val restored = headsUpQuiet.restoreAll()
         val migrated = requestAlertTypes()
         val filter = if (migrated) "alerting+silent+conversations" else "unchanged"
         DecisionLog.note(this, "listener connected filter=$filter")
         controller.onListenerConnected()
+        for (line in restored) DecisionLog.note(this, line)
     }
 
     override fun onListenerDisconnected() {
+        controller.quietHeadsUp = null
+        controller.restoreQuietChannels = null
         controller.activeNotifications = null
         controller.onListenerDisconnected()
         requestRebind(ComponentName(this, TickerListenerService::class.java))
