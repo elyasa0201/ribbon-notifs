@@ -23,13 +23,6 @@ internal fun openUsageAccess(activity: Activity) {
     open(activity, Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
 }
 
-internal fun openShadeAccess(activity: Activity) {
-    // The detail screen is a hidden system intent. One UI finds it and then
-    // throws SecurityException, which closed App Settings. The public list
-    // is the screen that holds the Shade access toggle.
-    open(activity, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-}
-
 private fun open(activity: Activity, intent: Intent) {
     try {
         activity.startActivity(intent)

@@ -35,22 +35,4 @@ internal object Grants {
     fun core(context: Context): Boolean {
         return notificationAccess(context) && usage(context) && overlay(context)
     }
-
-    fun shadeAccess(context: Context): Boolean {
-        val enabled = Settings.Secure.getInt(
-            context.contentResolver,
-            Settings.Secure.ACCESSIBILITY_ENABLED,
-            0
-        ) == 1
-        if (!enabled) return false
-        val flat = Settings.Secure.getString(
-            context.contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-        val mine = ComponentName(context, ShadePulseService::class.java)
-        return flat.split(':').any { token ->
-            val parsed = ComponentName.unflattenFromString(token)
-            parsed == mine || token.equals(mine.flattenToString(), ignoreCase = true)
-        }
-    }
 }

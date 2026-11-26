@@ -40,10 +40,10 @@ import java.util.ArrayDeque
  *
  * A heads-up is that shade row shown again as a popup. A channel write can
  * stop later popups when the platform allows it. It does not take down a
- * popup that is already on screen, and a normal listener is rejected. Opening
- * the notification shade marks that popup seen, SystemUI removes it, and the
- * shade entry stays. The shade is closed again once the popup has been taken
- * in.
+ * popup that is already on screen, and a normal listener is rejected. Nothing
+ * a normal app can call removes that popup while leaving the shade entry,
+ * short of opening the shade. Opening the shade is visible, so it is not
+ * opened. The popup stays up. The shade entry stays until a ribbon tap.
  *
  * Failure handling lives here: a missing grant, a null usage result before the
  * first unlock after boot, and listener disconnect.
@@ -362,7 +362,7 @@ internal class TickerController(private val app: Context) {
         if (!took) return
         val headsUp = (ranked && ranking.importance >= NotificationManager.IMPORTANCE_HIGH) ||
             (channelImportance != null && channelImportance >= NotificationManager.IMPORTANCE_HIGH)
-        if (headsUp) HeadsUpShade.hide()?.let { note("$it pkg=$pkg") }
+        if (headsUp) note("heads-up left reason=visible pkg=$pkg")
         quietHeadsUp?.invoke(sbn, channel)?.let { note(it) }
         showOnRibbon(
             Line(
