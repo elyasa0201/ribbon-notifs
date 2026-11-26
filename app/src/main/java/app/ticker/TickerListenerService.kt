@@ -19,7 +19,6 @@ class TickerListenerService : NotificationListenerService() {
                 emptyList()
             }
         }
-        controller.quietHeadsUp = { sbn, channel -> headsUpQuiet.quiet(sbn, channel) }
         controller.restoreQuietChannels = { headsUpQuiet.restoreAll() }
         val restored = headsUpQuiet.restoreAll()
         val migrated = requestAlertTypes()
@@ -30,7 +29,6 @@ class TickerListenerService : NotificationListenerService() {
     }
 
     override fun onListenerDisconnected() {
-        controller.quietHeadsUp = null
         controller.restoreQuietChannels = null
         controller.activeNotifications = null
         controller.onListenerDisconnected()

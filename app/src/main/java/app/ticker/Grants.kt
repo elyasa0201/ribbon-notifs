@@ -19,6 +19,16 @@ internal object Grants {
         }
     }
 
+    fun notificationAssistant(context: Context): Boolean {
+        val flat = Settings.Secure.getString(
+            context.contentResolver,
+            "enabled_notification_assistant"
+        ) ?: return false
+        val mine = ComponentName(context, TickerAssistantService::class.java)
+        val parsed = ComponentName.unflattenFromString(flat)
+        return parsed == mine || flat.equals(mine.flattenToString(), ignoreCase = true)
+    }
+
     fun overlay(context: Context): Boolean = Settings.canDrawOverlays(context)
 
     fun usage(context: Context): Boolean {

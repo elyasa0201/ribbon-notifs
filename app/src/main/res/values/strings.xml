@@ -18,6 +18,8 @@
     <string name="perm_overlay_why">Draws the thin strip. The strip does not take taps, so the app underneath still receives every touch.</string>
     <string name="perm_usage">Usage access</string>
     <string name="perm_usage_why">Sees which app is in front so Ribbon Notifs can turn on by itself. Without this, nothing arms automatically.</string>
+    <string name="perm_assistant">Notification assistant</string>
+    <string name="perm_assistant_why">Turns a pop-up off before it appears, while a chosen app is in front. The alert stays in the shade. On the next screen, pick Ribbon Notifs.</string>
 
     <string name="state_granted">Granted</string>
     <string name="state_missing">Missing</string>

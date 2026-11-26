@@ -38,11 +38,11 @@ import java.util.ArrayDeque
  * off it. A low-importance alert that is not minimized still scrolls. The
  * shade entry stays until the user opens it. Do Not Disturb stays off.
  *
- * A heads-up is that shade row shown again as a popup. This phone rejects
- * a listener write to the sending channel, and it has no companion screen
- * that would allow the write. Opening the shade is the other way to take
- * the popup down, and that open is visible, so it is not used. The popup
- * stays up. The shade entry stays until a ribbon tap.
+ * A heads-up is that shade row shown again as a popup. While a chosen app
+ * is in front, the notification assistant sets that alert to default
+ * importance before it is posted. Default does not pop, and the shade row
+ * stays until a ribbon tap. The original importance is put back when the
+ * chosen app leaves. The shade is not opened.
  *
  * Failure handling lives here: a missing grant, a null usage result before the
  * first unlock after boot, and listener disconnect.
@@ -110,14 +110,18 @@ internal class TickerController(private val app: Context) {
     internal var activeNotifications: (() -> List<StatusBarNotification>)? = null
 
     /**
-     * Drops a high-importance channel to default so the popup goes away and
-     * the shade row stays. Returns a debug line, or null when there was
-     * nothing to change.
+     * Asks the notification assistant to set this alert to default importance
+     * so it does not pop. Returns a debug line, or null when nothing changed.
      */
-    internal var quietHeadsUp: ((StatusBarNotification, NotificationChannel?) -> String?)? = null
+    internal var demoteHeadsUp: ((StatusBarNotification, NotificationChannel?) -> String?)? = null
 
-    /** Puts back channel importance lowered while a chosen app was in front. */
+    /** Puts assistant importance back to what the sending app had set. */
+    internal var restoreDemoted: (() -> List<String>)? = null
+
+    /** Puts back channel importance lowered by an older build. */
     internal var restoreQuietChannels: (() -> List<String>)? = null
+
+    private val assistantMiss = HashSet<String>()
 
     val masterEnabled: Boolean get() = prefs.masterEnabled
     fun isSelected(packageName: String): Boolean = packageName in prefs.selectedPackages
@@ -245,7 +249,12 @@ internal class TickerController(private val app: Context) {
         changed()
     }
 
+    fun onAssistantConnected() {
+        if (armed) quietActivePopups()
+    }
+
     fun onListenerDisconnected() {
+        restoreQuiet()
         listenerConnected = false
         forgetUsage()
         heldSelected = null
@@ -1268,16 +1277,30 @@ internal class TickerController(private val app: Context) {
         return template.contains("MediaStyle")
     }
 
-    private fun quietPopup(sbn: StatusBarNotification, channel: NotificationChannel?) {
-        val notification = sbn.notification ?: return
-        if (sbn.packageName == app.packageName) return
+    internal fun suppressesPopup(sbn: StatusBarNotification): Boolean {
+        if (!armed) return false
+        val notification = sbn.notification ?: return false
+        if (sbn.packageName == app.packageName) return false
         if (notification.category == Notification.CATEGORY_CALL ||
             notification.category == Notification.CATEGORY_ALARM ||
             notification.fullScreenIntent != null
         ) {
+            return false
+        }
+        return true
+    }
+
+    private fun quietPopup(sbn: StatusBarNotification, channel: NotificationChannel?) {
+        if (!suppressesPopup(sbn)) return
+        val demote = demoteHeadsUp
+        if (demote != null) {
+            demote(sbn, channel)?.let { note(it) }
             return
         }
-        quietHeadsUp?.invoke(sbn, channel)?.let { note(it) }
+        val channelId = sbn.notification?.channelId ?: "none"
+        if (assistantMiss.add("${sbn.packageName}:$channelId")) {
+            note("heads-up left pkg=${sbn.packageName} channel=$channelId reason=assistant")
+        }
     }
 
     private fun quietActivePopups() {
@@ -1292,6 +1315,9 @@ internal class TickerController(private val app: Context) {
     private fun restoreQuiet() {
         val lines = restoreQuietChannels?.invoke().orEmpty()
         for (line in lines) note(line)
+        val demoted = restoreDemoted?.invoke().orEmpty()
+        for (line in demoted) note(line)
+        assistantMiss.clear()
     }
 
     private fun changed() {
