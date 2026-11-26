@@ -38,12 +38,11 @@ import java.util.ArrayDeque
  * off it. A low-importance alert that is not minimized still scrolls. The
  * shade entry stays until the user opens it. Do Not Disturb stays off.
  *
- * A heads-up is that shade row shown again as a popup. A channel write can
- * stop later popups when the platform allows it. It does not take down a
- * popup that is already on screen, and a normal listener is rejected. Nothing
- * a normal app can call removes that popup while leaving the shade entry,
- * short of opening the shade. Opening the shade is visible, so it is not
- * opened. The popup stays up. The shade entry stays until a ribbon tap.
+ * A heads-up is that shade row shown again as a popup. While a chosen app
+ * is in front, the sending channel's popup is turned off by dropping its
+ * importance from high to default. Default keeps the sound and the shade
+ * row. The original importance is put back when that app leaves. The shade
+ * is not opened. Calls and alarms keep their popups.
  *
  * Failure handling lives here: a missing grant, a null usage result before the
  * first unlock after boot, and listener disconnect.
@@ -277,6 +276,14 @@ internal class TickerController(private val app: Context) {
             skip("own-package")
             return
         }
+        val ranking = Ranking()
+        val ranked = try {
+            rankingMap?.getRanking(sbn.key, ranking) == true
+        } catch (_: RuntimeException) {
+            false
+        }
+        val channel = if (ranked) ranking.channel else null
+        quietPopup(sbn, channel)
         if (pkg == MAPS_PACKAGE) {
             skip("maps")
             return
@@ -317,13 +324,6 @@ internal class TickerController(private val app: Context) {
             skip("posted-before-arm")
             return
         }
-        val ranking = Ranking()
-        val ranked = try {
-            rankingMap?.getRanking(sbn.key, ranking) == true
-        } catch (_: RuntimeException) {
-            false
-        }
-        val channel = if (ranked) ranking.channel else null
         val channelImportance = channel?.importance
         if (isMinimized(notification, ranked, ranking, channel)) {
             skip("minimized")
@@ -360,10 +360,6 @@ internal class TickerController(private val app: Context) {
             took = true
         }
         if (!took) return
-        val headsUp = (ranked && ranking.importance >= NotificationManager.IMPORTANCE_HIGH) ||
-            (channelImportance != null && channelImportance >= NotificationManager.IMPORTANCE_HIGH)
-        if (headsUp) note("heads-up left reason=visible pkg=$pkg")
-        quietHeadsUp?.invoke(sbn, channel)?.let { note(it) }
         showOnRibbon(
             Line(
                 line,
@@ -862,7 +858,11 @@ internal class TickerController(private val app: Context) {
             armed = true
             currentForeground = packageName
             val baseline = if (entered) captureBaseline() else null
-            if (entered) note("armed ${contextLine()} baseline=$baseline")
+            if (entered) {
+                note("armed ${contextLine()} baseline=$baseline")
+                quietActivePopups()
+                askPopupGrant()
+            }
         } else if (armed) {
             armed = false
             closeArrivalGate()
@@ -1267,6 +1267,42 @@ internal class TickerController(private val app: Context) {
     private fun isMedia(notification: Notification): Boolean {
         val template = notification.extras?.getString(Notification.EXTRA_TEMPLATE) ?: return false
         return template.contains("MediaStyle")
+    }
+
+    private fun quietPopup(sbn: StatusBarNotification, channel: NotificationChannel?) {
+        val notification = sbn.notification ?: return
+        if (sbn.packageName == app.packageName) return
+        if (notification.category == Notification.CATEGORY_CALL ||
+            notification.category == Notification.CATEGORY_ALARM ||
+            notification.fullScreenIntent != null
+        ) {
+            return
+        }
+        quietHeadsUp?.invoke(sbn, channel)?.let { note(it) }
+    }
+
+    private fun quietActivePopups() {
+        val posted = try {
+            activeNotifications?.invoke().orEmpty()
+        } catch (_: RuntimeException) {
+            emptyList()
+        }
+        for (sbn in posted) quietPopup(sbn, null)
+    }
+
+    private fun askPopupGrant() {
+        if (PopupGrant.associated(app) || !PopupGrant.markAsked()) return
+        val intent = Intent(app, PopupAssociationActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            app.startActivity(intent)
+        } catch (_: RuntimeException) {
+            note("heads-up left reason=companion")
+        }
+    }
+
+    fun onPopupGrantChanged() {
+        if (armed) quietActivePopups()
     }
 
     private fun restoreQuiet() {

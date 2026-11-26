@@ -12,15 +12,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * SystemUI keeps a heads-up only while the notification ranks at high
- * importance. Default importance still plays the channel sound and keeps
- * the shade row, and a ranking update at that level removes the popup.
+ * The channel popup setting is its importance. High and max pop on screen.
+ * Default still plays the channel sound and keeps the shade row, and the
+ * ranking update at that level takes the popup down.
  *
- * [NotificationListenerService.updateNotificationChannel] is the listener
- * write that drops the channel. The platform allows it for a companion
- * listener or the notification assistant and rejects it otherwise. A
- * rejection leaves the popup where it is. The importance we found is put
- * back when the selected app is no longer in front.
+ * [NotificationListenerService.updateNotificationChannel] is that write.
+ * The platform allows it once this app has a companion association, and
+ * rejects it otherwise. The importance we found is put back when the
+ * selected app is no longer in front. The sound is left untouched.
  */
 internal class HeadsUpQuiet(private val service: NotificationListenerService) {
     private val prefs by lazy { service.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
@@ -53,7 +52,7 @@ internal class HeadsUpQuiet(private val service: NotificationListenerService) {
             if (!writeChannel(sbn.packageName, user, channel)) {
                 channel.importance = original
                 denied.add(key)
-                return left(sbn.packageName, channel.id, "listener")
+                return left(sbn.packageName, channel.id, "companion")
             }
             cached[key] = channel
             val next = stored().toMutableList()
@@ -77,7 +76,7 @@ internal class HeadsUpQuiet(private val service: NotificationListenerService) {
                     keep.add(item)
                     if (denied.add("restore:$key")) {
                         notes.add(
-                            "heads-up restore pkg=${item.pkg} channel=${item.channelId} reason=listener"
+                            "heads-up restore pkg=${item.pkg} channel=${item.channelId} reason=companion"
                         )
                     }
                     continue
@@ -91,7 +90,7 @@ internal class HeadsUpQuiet(private val service: NotificationListenerService) {
                     channel.importance = NotificationManager.IMPORTANCE_DEFAULT
                     keep.add(item)
                     notes.add(
-                        "heads-up restore pkg=${item.pkg} channel=${item.channelId} reason=listener"
+                        "heads-up restore pkg=${item.pkg} channel=${item.channelId} reason=companion"
                     )
                     continue
                 }
@@ -107,10 +106,10 @@ internal class HeadsUpQuiet(private val service: NotificationListenerService) {
     }
 
     /**
-     * A companion listener or the notification assistant is allowed to write
-     * the channel. Any other listener is rejected and the channel stays as it
-     * was. Call this only while the listener is bound; an unbound call returns
-     * without writing and without throwing.
+     * A listener with a companion association is allowed to write the channel.
+     * Any other listener is rejected and the channel stays as it was. Call
+     * this only while the listener is bound; an unbound call returns without
+     * writing and without throwing.
      */
     private fun writeChannel(pkg: String, user: UserHandle, channel: NotificationChannel): Boolean {
         return try {

@@ -18,6 +18,9 @@
     <string name="perm_overlay_why">Draws the thin strip. The strip does not take taps, so the app underneath still receives every touch.</string>
     <string name="perm_usage">Usage access</string>
     <string name="perm_usage_why">Sees which app is in front so Ribbon Notifs can turn on by itself. Without this, nothing arms automatically.</string>
+    <string name="perm_popup">Popup setting</string>
+    <string name="perm_popup_why">Turns off the pop-up for a sending channel while a chosen app is in front, then turns that pop-up back on. The notification stays in the shade. Android asks once before Ribbon Notifs can change that setting.</string>
+    <string name="popup_association_name">Ribbon Notifs</string>
 
     <string name="state_granted">Granted</string>
     <string name="state_missing">Missing</string>
