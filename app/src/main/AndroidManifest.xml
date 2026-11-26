@@ -3,14 +3,9 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
-    <uses-permission android:name="android.permission.REQUEST_COMPANION_SELF_MANAGED" />
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
-
-    <uses-feature
-        android:name="android.software.companion_device_setup"
-        android:required="false" />
 
     <queries>
         <intent>
@@ -63,13 +58,6 @@
             android:label="@string/permissions_title" />
 
         <activity
-            android:name=".PopupAssociationActivity"
-            android:excludeFromRecents="true"
-            android:exported="false"
-            android:noHistory="true"
-            android:theme="@style/Theme.PopupGrant" />
-
-        <activity
             android:name=".RuleExplanationActivity"
             android:exported="true"
             android:label="@string/rule_name">
@@ -84,15 +72,6 @@
                 android:name="android.service.zen.automatic.ruleInstanceLimit"
                 android:value="@integer/rule_instance_limit" />
         </activity>
-
-        <service
-            android:name=".TickerCompanionService"
-            android:exported="true"
-            android:permission="android.permission.BIND_COMPANION_DEVICE_SERVICE">
-            <intent-filter>
-                <action android:name="android.companion.CompanionDeviceService" />
-            </intent-filter>
-        </service>
 
         <service
             android:name=".TickerListenerService"

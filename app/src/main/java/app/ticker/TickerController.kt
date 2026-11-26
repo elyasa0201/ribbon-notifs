@@ -38,11 +38,11 @@ import java.util.ArrayDeque
  * off it. A low-importance alert that is not minimized still scrolls. The
  * shade entry stays until the user opens it. Do Not Disturb stays off.
  *
- * A heads-up is that shade row shown again as a popup. While a chosen app
- * is in front, the sending channel's popup is turned off by dropping its
- * importance from high to default. Default keeps the sound and the shade
- * row. The original importance is put back when that app leaves. The shade
- * is not opened. Calls and alarms keep their popups.
+ * A heads-up is that shade row shown again as a popup. This phone rejects
+ * a listener write to the sending channel, and it has no companion screen
+ * that would allow the write. Opening the shade is the other way to take
+ * the popup down, and that open is visible, so it is not used. The popup
+ * stays up. The shade entry stays until a ribbon tap.
  *
  * Failure handling lives here: a missing grant, a null usage result before the
  * first unlock after boot, and listener disconnect.
@@ -861,7 +861,6 @@ internal class TickerController(private val app: Context) {
             if (entered) {
                 note("armed ${contextLine()} baseline=$baseline")
                 quietActivePopups()
-                askPopupGrant()
             }
         } else if (armed) {
             armed = false
@@ -1288,21 +1287,6 @@ internal class TickerController(private val app: Context) {
             emptyList()
         }
         for (sbn in posted) quietPopup(sbn, null)
-    }
-
-    private fun askPopupGrant() {
-        if (PopupGrant.associated(app) || !PopupGrant.markAsked()) return
-        val intent = Intent(app, PopupAssociationActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        try {
-            app.startActivity(intent)
-        } catch (_: RuntimeException) {
-            note("heads-up left reason=companion")
-        }
-    }
-
-    fun onPopupGrantChanged() {
-        if (armed) quietActivePopups()
     }
 
     private fun restoreQuiet() {

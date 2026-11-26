@@ -23,10 +23,6 @@ internal fun openUsageAccess(activity: Activity) {
     open(activity, Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
 }
 
-internal fun openPopupGrant(activity: Activity) {
-    activity.startActivity(Intent(activity, PopupAssociationActivity::class.java))
-}
-
 private fun open(activity: Activity, intent: Intent) {
     try {
         activity.startActivity(intent)
