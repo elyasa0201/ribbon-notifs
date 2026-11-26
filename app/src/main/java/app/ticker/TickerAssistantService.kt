@@ -55,11 +55,11 @@ class TickerAssistantService : NotificationAssistantService() {
     }
 
     private fun demote(sbn: StatusBarNotification, channel: NotificationChannel?): String? {
-        val importance = channel?.importance ?: rankedImportance(sbn) ?: return null
+        val importance = channel?.importance ?: rankedImportance(sbn)
         val adjustment = demotion(sbn, importance) ?: return null
         return try {
             adjustNotification(adjustment)
-            quietLine(sbn, importance)
+            quietLine(sbn, importance ?: NotificationManager.IMPORTANCE_HIGH)
         } catch (_: RuntimeException) {
             forget(sbn.key)
             leftLine(sbn)
@@ -69,8 +69,8 @@ class TickerAssistantService : NotificationAssistantService() {
     private fun demotion(sbn: StatusBarNotification, importance: Int?): Adjustment? {
         if (!controller.suppressesPopup(sbn)) return null
         val user = sbn.user ?: return null
-        if (importance == null || importance < NotificationManager.IMPORTANCE_HIGH) return null
-        val original = importance
+        if (importance != null && importance < NotificationManager.IMPORTANCE_HIGH) return null
+        val original = importance ?: NotificationManager.IMPORTANCE_HIGH
         synchronized(lowered) {
             if (lowered.containsKey(sbn.key)) return null
             lowered[sbn.key] = Held(

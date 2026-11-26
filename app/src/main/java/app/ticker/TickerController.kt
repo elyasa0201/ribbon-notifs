@@ -39,10 +39,10 @@ import java.util.ArrayDeque
  * shade entry stays until the user opens it. Do Not Disturb stays off.
  *
  * A heads-up is that shade row shown again as a popup. While a chosen app
- * is in front, the notification assistant sets that alert to default
- * importance before it is posted. Default does not pop, and the shade row
- * stays until a ribbon tap. The original importance is put back when the
- * chosen app leaves. The shade is not opened.
+ * is in front, every ordinary alert that scrolls is kept off the pop-up.
+ * A channel write does that when the phone allows it. A missing channel or
+ * a rejected write still leaves the pop-up, so those are collapsed without
+ * opening the shade. The shade row stays until a ribbon tap.
  *
  * Failure handling lives here: a missing grant, a null usage result before the
  * first unlock after boot, and listener disconnect.
@@ -110,6 +110,12 @@ internal class TickerController(private val app: Context) {
     internal var activeNotifications: (() -> List<StatusBarNotification>)? = null
 
     /**
+     * Drops a high channel to default when the phone allows the write.
+     * Returns a debug line, or null when nothing changed.
+     */
+    internal var quietHeadsUp: ((StatusBarNotification, NotificationChannel?) -> String?)? = null
+
+    /**
      * Asks the notification assistant to set this alert to default importance
      * so it does not pop. Returns a debug line, or null when nothing changed.
      */
@@ -121,7 +127,7 @@ internal class TickerController(private val app: Context) {
     /** Puts back channel importance lowered by an older build. */
     internal var restoreQuietChannels: (() -> List<String>)? = null
 
-    private val assistantMiss = HashSet<String>()
+    private var collapseMissLogged = false
 
     val masterEnabled: Boolean get() = prefs.masterEnabled
     fun isSelected(packageName: String): Boolean = packageName in prefs.selectedPackages
@@ -292,7 +298,7 @@ internal class TickerController(private val app: Context) {
             false
         }
         val channel = if (ranked) ranking.channel else null
-        quietPopup(sbn, channel)
+        quietPopup(sbn, channel, if (ranked) ranking.importance else null)
         if (pkg == MAPS_PACKAGE) {
             skip("maps")
             return
@@ -1290,17 +1296,23 @@ internal class TickerController(private val app: Context) {
         return true
     }
 
-    private fun quietPopup(sbn: StatusBarNotification, channel: NotificationChannel?) {
+    private fun quietPopup(sbn: StatusBarNotification, channel: NotificationChannel?, rank: Int?) {
         if (!suppressesPopup(sbn)) return
-        val demote = demoteHeadsUp
-        if (demote != null) {
-            demote(sbn, channel)?.let { note(it) }
-            return
-        }
-        val channelId = sbn.notification?.channelId ?: "none"
-        if (assistantMiss.add("${sbn.packageName}:$channelId")) {
-            note("heads-up left pkg=${sbn.packageName} channel=$channelId reason=assistant")
-        }
+        val wrote = quietHeadsUp?.invoke(sbn, channel)
+        if (wrote != null) note(wrote)
+        demoteHeadsUp?.invoke(sbn, channel)?.let { note(it) }
+        if (wrote != null && wrote.startsWith("heads-up quiet")) return
+        val failed = wrote != null && wrote.contains("heads-up left")
+        val channelHigh = channel?.importance?.let { it >= NotificationManager.IMPORTANCE_HIGH } == true
+        val rankHigh = rank != null && rank >= NotificationManager.IMPORTANCE_HIGH
+        if (failed || channelHigh || rankHigh) retractPopup(sbn.packageName)
+    }
+
+    private fun retractPopup(pkg: String) {
+        if (PopupCollapseService.request(pkg)) return
+        if (collapseMissLogged) return
+        collapseMissLogged = true
+        note("heads-up left pkg=$pkg reason=collapse")
     }
 
     private fun quietActivePopups() {
@@ -1309,7 +1321,7 @@ internal class TickerController(private val app: Context) {
         } catch (_: RuntimeException) {
             emptyList()
         }
-        for (sbn in posted) quietPopup(sbn, null)
+        for (sbn in posted) quietPopup(sbn, null, null)
     }
 
     private fun restoreQuiet() {
@@ -1317,7 +1329,7 @@ internal class TickerController(private val app: Context) {
         for (line in lines) note(line)
         val demoted = restoreDemoted?.invoke().orEmpty()
         for (line in demoted) note(line)
-        assistantMiss.clear()
+        collapseMissLogged = false
     }
 
     private fun changed() {

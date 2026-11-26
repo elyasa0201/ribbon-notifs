@@ -23,6 +23,10 @@ internal fun openUsageAccess(activity: Activity) {
     open(activity, Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
 }
 
+internal fun openPopupCollapse(activity: Activity) {
+    open(activity, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+}
+
 internal fun openAssistantAccess(activity: Activity) {
     val action = Intent(Settings.ACTION_NOTIFICATION_ASSISTANT_SETTINGS)
     if (action.resolveActivity(activity.packageManager) != null) {

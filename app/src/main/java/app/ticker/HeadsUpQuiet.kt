@@ -40,14 +40,12 @@ internal class HeadsUpQuiet(private val service: NotificationListenerService) {
             } else {
                 load(sbn.packageName, user, channelId)
             }
-                ?: return if (!denied.add(key)) {
-                    null
-                } else {
-                    left(sbn.packageName, channelId, "no-channel")
+                ?: return left(sbn.packageName, channelId, "no-channel").also {
+                    denied.add(key)
                 }
             val original = channel.importance
             if (original < NotificationManager.IMPORTANCE_HIGH) return null
-            if (denied.contains(key)) return null
+            if (denied.contains(key)) return left(sbn.packageName, channel.id, "listener")
             channel.importance = NotificationManager.IMPORTANCE_DEFAULT
             if (!writeChannel(sbn.packageName, user, channel)) {
                 channel.importance = original
