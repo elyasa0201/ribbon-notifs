@@ -38,9 +38,7 @@ class PermissionsActivity : android.app.Activity() {
         val rows = listOf(
             Perm(R.string.perm_notification, R.string.perm_notification_why) { openNotificationAccess(this) },
             Perm(R.string.perm_overlay, R.string.perm_overlay_why) { openOverlayAccess(this) },
-            Perm(R.string.perm_usage, R.string.perm_usage_why) { openUsageAccess(this) },
-            Perm(R.string.perm_assistant, R.string.perm_assistant_why) { openAssistantAccess(this) },
-            Perm(R.string.perm_collapse, R.string.perm_collapse_why) { openPopupCollapse(this) }
+            Perm(R.string.perm_usage, R.string.perm_usage_why) { openUsageAccess(this) }
         )
         val container = findViewById<LinearLayout>(R.id.permission_rows)
         val inflater = layoutInflater
@@ -106,9 +104,7 @@ class PermissionsActivity : android.app.Activity() {
         val granted = listOf(
             Grants.notificationAccess(this),
             Grants.overlay(this),
-            Grants.usage(this),
-            Grants.notificationAssistant(this),
-            Grants.popupCollapse(this)
+            Grants.usage(this)
         )
         for (index in states.indices) {
             val ok = granted[index]

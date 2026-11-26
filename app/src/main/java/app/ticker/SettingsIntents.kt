@@ -23,23 +23,6 @@ internal fun openUsageAccess(activity: Activity) {
     open(activity, Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
 }
 
-internal fun openPopupCollapse(activity: Activity) {
-    open(activity, Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-}
-
-internal fun openAssistantAccess(activity: Activity) {
-    val action = Intent(Settings.ACTION_NOTIFICATION_ASSISTANT_SETTINGS)
-    if (action.resolveActivity(activity.packageManager) != null) {
-        open(activity, action)
-        return
-    }
-    val explicit = Intent().setClassName(
-        "com.android.settings",
-        "com.android.settings.Settings\$NotificationAssistantSettingsActivity"
-    )
-    open(activity, explicit)
-}
-
 private fun open(activity: Activity, intent: Intent) {
     try {
         activity.startActivity(intent)

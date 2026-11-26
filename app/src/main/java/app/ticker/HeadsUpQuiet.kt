@@ -6,60 +6,19 @@ import android.content.Context
 import android.os.Parcel
 import android.os.UserHandle
 import android.service.notification.NotificationListenerService
-import android.service.notification.StatusBarNotification
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * The channel popup setting is its importance. High and max pop on screen.
- * Default still plays the channel sound and keeps the shade row, and the
- * ranking update at that level takes the popup down.
- *
- * [NotificationListenerService.updateNotificationChannel] is that write.
- * This phone rejects it for a normal listener. The importance we found is
- * put back when the selected app is no longer in front. The sound is left
- * untouched.
+ * An older build lowered some channel importance and stored the original.
+ * This puts that importance back so alerts behave as the sending app set
+ * them. The sound is left untouched. New alerts are not rewritten.
  */
 internal class HeadsUpQuiet(private val service: NotificationListenerService) {
     private val prefs by lazy { service.getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
     private val denied = HashSet<String>()
     private val cached = HashMap<String, NotificationChannel>()
-
-    fun quiet(sbn: StatusBarNotification, ranked: NotificationChannel?): String? {
-        val channelId = sbn.notification?.channelId
-        val user = sbn.user
-        if (channelId.isNullOrEmpty() || user == null) {
-            return left(sbn.packageName, channelId, "no-channel")
-        }
-        synchronized(this) {
-            val key = key(sbn.packageName, user, channelId)
-            if (stored().any { it.same(sbn.packageName, user, channelId) }) return null
-            val channel = if (ranked?.id == channelId) {
-                ranked
-            } else {
-                load(sbn.packageName, user, channelId)
-            }
-                ?: return left(sbn.packageName, channelId, "no-channel").also {
-                    denied.add(key)
-                }
-            val original = channel.importance
-            if (original < NotificationManager.IMPORTANCE_HIGH) return null
-            if (denied.contains(key)) return left(sbn.packageName, channel.id, "listener")
-            channel.importance = NotificationManager.IMPORTANCE_DEFAULT
-            if (!writeChannel(sbn.packageName, user, channel)) {
-                channel.importance = original
-                denied.add(key)
-                return left(sbn.packageName, channel.id, "listener")
-            }
-            cached[key] = channel
-            val next = stored().toMutableList()
-            next.add(Lowered(sbn.packageName, user, channel.id, original))
-            write(next)
-            return "heads-up quiet pkg=${sbn.packageName} channel=${channel.id} " +
-                "importance=$original->${NotificationManager.IMPORTANCE_DEFAULT}"
-        }
-    }
 
     fun restoreAll(): List<String> {
         synchronized(this) {
@@ -128,11 +87,6 @@ internal class HeadsUpQuiet(private val service: NotificationListenerService) {
             null
         } ?: return null
         return listed.firstOrNull { it.id == channelId }
-    }
-
-    private fun left(pkg: String, channelId: String?, reason: String): String {
-        val channel = if (channelId.isNullOrEmpty()) "" else " channel=$channelId"
-        return "heads-up left pkg=$pkg$channel reason=$reason"
     }
 
     private fun stored(): List<Lowered> {
@@ -216,11 +170,7 @@ internal class HeadsUpQuiet(private val service: NotificationListenerService) {
         val user: UserHandle,
         val channelId: String,
         val importance: Int
-    ) {
-        fun same(pkg: String, user: UserHandle, channelId: String): Boolean {
-            return this.pkg == pkg && this.user == user && this.channelId == channelId
-        }
-    }
+    )
 
     private companion object {
         const val PREFS = "ticker_heads_up"

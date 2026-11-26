@@ -19,34 +19,6 @@ internal object Grants {
         }
     }
 
-    fun notificationAssistant(context: Context): Boolean {
-        val flat = Settings.Secure.getString(
-            context.contentResolver,
-            "enabled_notification_assistant"
-        ) ?: return false
-        val mine = ComponentName(context, TickerAssistantService::class.java)
-        val parsed = ComponentName.unflattenFromString(flat)
-        return parsed == mine || flat.equals(mine.flattenToString(), ignoreCase = true)
-    }
-
-    fun popupCollapse(context: Context): Boolean {
-        val enabled = Settings.Secure.getInt(
-            context.contentResolver,
-            Settings.Secure.ACCESSIBILITY_ENABLED,
-            0
-        ) == 1
-        if (!enabled) return false
-        val flat = Settings.Secure.getString(
-            context.contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        ) ?: return false
-        val mine = ComponentName(context, PopupCollapseService::class.java)
-        return flat.split(':').any { token ->
-            val parsed = ComponentName.unflattenFromString(token)
-            parsed == mine || token.equals(mine.flattenToString(), ignoreCase = true)
-        }
-    }
-
     fun overlay(context: Context): Boolean = Settings.canDrawOverlays(context)
 
     fun usage(context: Context): Boolean {
