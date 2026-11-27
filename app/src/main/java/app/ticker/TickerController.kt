@@ -335,10 +335,8 @@ internal class TickerController(private val app: Context) {
         }
         val rank = if (ranked) ranking.importance else -1
         val channelRank = channelImportance ?: -1
-        note(
-            "accept pkg=$pkg ${contextLine()} reason=shown " +
-                "rank=$rank channel=$channelRank peek=$peek"
-        )
+        val channelId = channel?.id?.takeIf { it.isNotEmpty() } ?: notification.channelId
+        note(acceptLine(pkg, channelId, rank, channelRank, peek))
         var took = false
         synchronized(postedLock) {
             if (isDuplicate(posted)) return@synchronized
@@ -1269,6 +1267,72 @@ internal class TickerController(private val app: Context) {
 
     private fun debug(message: String) {
         if (BuildConfig.DEBUG) Log.i(TAG, message)
+    }
+
+    private fun acceptLine(
+        pkg: String,
+        channelId: String?,
+        rank: Int,
+        channelImportance: Int,
+        peekSuppressed: Boolean
+    ): String {
+        val high = rank >= NotificationManager.IMPORTANCE_HIGH ||
+            (rank < 0 && channelImportance >= NotificationManager.IMPORTANCE_HIGH)
+        val hideRan = popupHold.hideRan()
+        val failure = popupHold.failure()
+        val switchOff = popupHold.switchOff()
+        val headsUp = high && !peekSuppressed && !switchOff
+        val ribbon = Grants.overlay(app) && (overlay.isShowing() || canShowOnStrip())
+        val both = ribbon && headsUp
+        val why = popupWhy(both, headsUp, ribbon, high, peekSuppressed, hideRan, failure, switchOff)
+        return "accept pkg=$pkg channelId=${logToken(channelId)} rank=$rank " +
+            "channelImportance=$channelImportance headsUp=$headsUp hide=$hideRan " +
+            "both=$both fail=${failure ?: "none"} ${contextLine()} why=$why"
+    }
+
+    private fun popupWhy(
+        both: Boolean,
+        headsUp: Boolean,
+        ribbon: Boolean,
+        high: Boolean,
+        peekSuppressed: Boolean,
+        hideRan: Boolean,
+        failure: String?,
+        switchOff: Boolean
+    ): String {
+        val hide = when {
+            failure != null -> "the hide failed with $failure"
+            !hideRan -> "the hide did not run"
+            !switchOff -> "the heads-up switch is still on after the hide"
+            else -> null
+        }
+        if (both) {
+            return "Ribbon and pop-up are both on screen because this alert is high " +
+                "importance, peek is not suppressed, and ${hide ?: "the heads-up switch is still on"}"
+        }
+        if (headsUp && !ribbon) {
+            return "The pop-up is up and the ribbon is not, because this alert is high " +
+                "importance, peek is not suppressed, and ${hide ?: "the heads-up switch is still on"}"
+        }
+        val down = when {
+            switchOff -> "the heads-up switch is off"
+            peekSuppressed -> "peek is suppressed"
+            !high -> "importance is below high"
+            else -> "the system did not draw a pop-up"
+        }
+        val failed = when {
+            failure != null -> " The hide failed with $failure."
+            !hideRan -> " The hide did not run."
+            else -> ""
+        }
+        val where = if (ribbon) "Only the ribbon is on screen" else "The ribbon is not on screen"
+        return "Pop-up stays down because $down.$failed $where"
+    }
+
+    private fun logToken(raw: String?): String {
+        if (raw.isNullOrEmpty()) return "-"
+        val cleaned = raw.replace(Regex("[\\s=]"), "_")
+        return cleaned.ifEmpty { "-" }
     }
 
     private fun note(message: String) {
