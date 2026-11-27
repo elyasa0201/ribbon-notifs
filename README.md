@@ -1,4 +1,4 @@
-[Download APK](https://github.com/elyasa0201/ribbon-notifs/releases/download/v0.1.0/app-debug.apk)
+[Ribbon Notifs](https://github.com/elyasa0201/ribbon-notifs/releases/download/v0.1.0/RibbonNotifs.apk)
 
 # Ribbon Notifs
 
